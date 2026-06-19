@@ -1,0 +1,25 @@
+# Secretos — NUNCA subir
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Salidas generadas en runtime
+outputs/
+*.png
+*.xlsx
+
+# Cache de esquema (se regenera)
+db/schema_cache.json
+
+# macOS / editores
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,33 @@
+# AskDB — "Habla con tus Datos" · dependencias (jun 2026)
+
+# IA / razonamiento
+anthropic>=0.69,<1.0
+
+# Bot de Telegram (Fase 6)
+python-telegram-bot>=21.6,<22
+
+# Base de datos Postgres (Supabase)
+psycopg[binary]>=3.2,<4
+psycopg_pool>=3.2,<4
+
+# Validación de SQL (guardrails)
+sqlparse>=0.5,<0.6
+
+# Salidas: gráficas y Excel
+matplotlib>=3.9,<4
+pandas>=2.2,<3
+openpyxl>=3.1,<4
+
+# Transcripción de voz (Fase 7)
+groq>=0.13,<1
+
+# API / hosting
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+httpx>=0.27,<1
+
+# Config
+python-dotenv>=1.0,<2
+
+# Tests
+pytest>=8.0,<9
