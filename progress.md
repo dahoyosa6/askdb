@@ -3,10 +3,11 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 3 COMPLETA ✅ (auto-corrección) → siguiente: Fase 4 (router de formato).
-- **% MVP:** ~45%.
-- **Próximo paso:** Fase 4 — router de formato de salida (texto / gráfica PNG / Excel-CSV)
-  en `app/output/` (chart, spreadsheet, router), decidido según forma del resultado.
+- **Fase actual:** Fase 4 COMPLETA ✅ (router de formato) → siguiente: Fase 5 (memoria conversacional).
+- **% MVP:** ~55%. El cerebro está completo punta a punta por CLI (pregunta → SQL seguro →
+  auto-corrección → formato adecuado).
+- **Próximo paso:** Fase 5 — memoria conversacional corta para follow-ups ("¿y el mes pasado?")
+  usando el `chat_id` ya reservado en `answer_question`.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -15,7 +16,7 @@
 | F1 | Core CLI (NL→SQL→ejecutar→tabla) | ✅ Terminada (vivo) | 17/17 + prueba en vivo |
 | F2 | Guardrails de seguridad | ✅ Terminada | 41/41 (validador) + e2e timeout |
 | F3 | Auto-corrección | ✅ Terminada | 63/63 (5 nuevos, mockeados) |
-| F4 | Router de formato (texto/gráfica/Excel) | Pendiente | — |
+| F4 | Router de formato (texto/gráfica/Excel) | ✅ Terminada | 88/88 (25 nuevos) |
 | F5 | Memoria conversacional | Pendiente | — |
 | F6 | Bot Telegram (texto) | Pendiente | — |
 | F7 | Voz (Groq) | Pendiente | — |
@@ -49,19 +50,42 @@
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
 - [ ] (Fase 8) Crear cuenta/keys de Telegram (BotFather) y Groq cuando lleguemos a esas fases.
 
-## Para la PRÓXIMA sesión (Fase 4 — router de formato de salida)
-- **Objetivo:** elegir automáticamente el formato según el resultado: un dato → texto;
-  tendencia/ranking → gráfica PNG (matplotlib); detalle largo → Excel/CSV (pandas+openpyxl).
-- Construir `app/output/{chart.py, spreadsheet.py, router.py}`. El router recibe
-  `(columns, rows)` (o el `AnswerResult`) y devuelve qué formato + el artefacto generado.
-- Integrar en el pipeline: `answer_question` ya devuelve `AnswerResult(columns, rows, sql)`;
-  decidir si el router se llama dentro de `answer_question` o en la capa de interfaz (el CLI/bot).
-  Recomendación: mantener `answer_question` puro (datos) y poner el router en la capa de salida.
-- Tests: dataset de 1 fila/1 col → texto; serie temporal/ranking → gráfica; muchas filas → Excel.
-  Usar `settings.chart_max_rows` y `settings.table_max_rows_text` (ya existen en config).
-- Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md` del proyecto; `source venv/bin/activate`;
-  `pytest` debe dar **63/63** antes de tocar nada. Código clave: `app/agent/execute.py`
-  (`answer_question`, `AnswerResult`), `app/cli.py`, `config.py`.
+## Para la PRÓXIMA sesión (Fase 5 — memoria conversacional)
+- **Objetivo:** que un follow-up ("¿y el mes pasado?") se entienda sin repetir contexto,
+  dentro de la misma conversación. Criterio F5 del PRD.
+- `answer_question(question, chat_id=None, ...)` ya tiene `chat_id` RESERVADO (hoy sin uso).
+  `generate_sql(...)` ya acepta `history` (lista de mensajes estilo API). Construir el módulo
+  `app/agent/memory.py`: guardar/recuperar los últimos N turnos por `chat_id` (usar
+  `settings.memory_window`, ya en config = 6) y pasarlos como `history` a `generate_sql`.
+- Decidir almacén: en memoria (dict por chat_id) basta para v1/demo; documentar que se pierde al
+  reiniciar (aceptable hasta tener persistencia). Mantener `answer_question` testeable (inyectable).
+- Tests (mockeados): un 2º turno hereda contexto del 1º (el `history` llega a generate_sql);
+  la ventana se respeta (no crece sin límite); chat_id distinto = memoria aislada.
+- Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md`; `source venv/bin/activate`;
+  `pytest` debe dar **88/88** antes de tocar nada. Código clave: `app/agent/execute.py`
+  (`answer_question`), `app/agent/generate_sql.py` (`history`), `config.py` (`memory_window`).
+
+## Bitácora Fase 4 (router de formato de salida)
+### 2026-06-19
+- Capa de salida nueva en `app/output/`: `router.py` (dataclass `OutputResult` +
+  `enrutar_salida(result, *, generar_artefacto=True)` + heurística determinista `elegir_formato`
+  y helpers `_clasificar_columna`/`_tipo_de_grafica`/`_formatear_texto`), `chart.py`
+  (`generar_grafica`, matplotlib backend `Agg` headless, barras/línea, `plt.close` siempre) y
+  `spreadsheet.py` (`generar_excel`, pandas+openpyxl, des-duplica columnas homónimas).
+  (delegado a code-architect reps 1–4; verificado por el Head.)
+- **Decisiones de producto (David):** detalle largo → **Excel `.xlsx`** (no CSV); un solo
+  registro (1 fila) → **siempre texto** en el chat (un valor = frase; ficha = lista).
+- **Decisiones técnicas:** fechas = solo tipos nativos `date`/`datetime` (serie → línea);
+  `Decimal` cuenta como numérico, `bool` no; nombre de archivo determinista por hash de contenido
+  (`sha1[:8]`, idempotente, sin fecha/azar → tests reproducibles).
+- **Seguridad (regla dura):** si generar gráfica/Excel falla, el router captura, loguea del lado
+  servidor y **cae a texto**; nunca propaga el error ni expone stacktrace. Rama texto es pura
+  (no toca disco ni importa matplotlib).
+- **Rep 5 (Head):** `app/cli.py` integra `enrutar_salida`: texto se imprime; gráfica/Excel muestra
+  ruta + caption + vista previa tabular acotada (`table_max_rows_text`). El CLI sigue mostrando el
+  SQL (herramienta de dev); `answer_question` quedó intacto.
+- Artefactos (`outputs/`, `*.png`, `*.xlsx`) siguen gitignored. Sin dependencias nuevas.
+  **Suite total: 88/88 verdes** (63 previos + 25 nuevos). No se ejecutó el CLI en vivo.
 
 ## Bitácora Fase 3 (auto-corrección)
 ### 2026-06-19

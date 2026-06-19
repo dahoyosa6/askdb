@@ -19,6 +19,7 @@ import sys
 from config import settings
 
 from app.agent.execute import answer_question
+from app.output.router import enrutar_salida
 
 
 def _setup_logging() -> None:
@@ -92,11 +93,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{result.error_message}")
         return 1
 
+    # El SQL ejecutado se muestra porque la CLI es herramienta de desarrollo.
+    # (El bot de Telegram, Fase 6, no lo mostrará.)
     print("\n--- SQL ejecutado ---")
     print(result.sql)
 
-    print("\n--- Resultados ---")
-    print(_render_table(result.columns, result.rows))
+    # El router decide el formato (texto / gráfica / Excel) según la forma del
+    # resultado. answer_question queda intacto; la presentación vive aquí.
+    salida = enrutar_salida(result)
+
+    if salida.kind == "text":
+        print("\n--- Resultados ---")
+        print(salida.text)
+        return 0
+
+    # Gráfica o Excel: la terminal no renderiza binarios, así que mostramos la
+    # ruta del archivo generado, su leyenda, y una vista previa tabular acotada.
+    print(f"\n--- Archivo generado ({salida.kind}) ---")
+    print(salida.file_path)
+    if salida.caption:
+        print(salida.caption)
+
+    print("\n--- Vista previa ---")
+    print(_render_table(result.columns, result.rows[: settings.table_max_rows_text]))
 
     return 0
 

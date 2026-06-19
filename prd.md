@@ -126,3 +126,12 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   o `psycopg.Error`), se reinyecta el error saneado como `error_feedback` al siguiente
   `generate_sql`. Al agotar los 3, se devuelve un mensaje claro en español SIN SQL crudo ni error
   interno (el error real solo se loguea del lado servidor). (Fase 3.)
+- 2026-06-19 — **Formato de salida (F4): "detalle largo" = Excel `.xlsx`** (no CSV; openpyxl ya
+  instalado, más amigable para una PYME). **"Un dato" = cualquier resultado de 1 fila → texto**
+  en el chat (un valor = frase; varias columnas = ficha en lista), nunca un archivo por una sola
+  fila. (Decisiones de producto de David.)
+- 2026-06-19 — **Heurística de formato DETERMINISTA (sin IA)** por forma del resultado (nº filas/
+  columnas + tipos): gratis, predecible y testeable. Gráfica solo con 2 columnas (1 numérica +
+  1 eje): línea si el eje es fecha, barras si es categórico. Si generar gráfica/Excel falla, el
+  router cae a texto (nunca expone el error). El router vive en la capa de salida; `answer_question`
+  permanece puro (solo datos). (Fase 4.)
