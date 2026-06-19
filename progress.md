@@ -64,6 +64,6 @@
 
 ## Accesos y enlaces
 - Repo local: `/Users/davidhoyos/Clientes/AskDB`
-- GitHub: (pendiente crear, público)
-- Neon: (pendiente)
+- GitHub: https://github.com/dahoyosa6/askdb (público)
+- Neon: proyecto `AskDB` (org dahoyosa6) — base `neondb`, rol runtime `askdb_readonly`
 - Railway: (pendiente, Fase 8)
