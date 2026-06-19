@@ -3,16 +3,16 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 1 (core CLI) CONSTRUIDA ✅ — falta solo la prueba EN VIVO.
-- **% MVP:** ~22%.
-- **Bloqueo:** `ANTHROPIC_API_KEY` en `.env` sigue siendo el placeholder. David debe rotar
-  la key vieja (comprometida) y pegar la real para correr `python -m app.cli "..."` punta a punta.
+- **Fase actual:** Fase 1 COMPLETA ✅ (probada en vivo) → siguiente: Fase 2 (guardrails).
+- **% MVP:** ~28%.
+- **Próximo paso:** Fase 2 — validador de SQL (`validate_sql.py`): solo SELECT/CTE, una
+  sentencia, bloquear DDL/DML, inyectar LIMIT. Tests de "DELETE bloqueado por app".
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
 |---|---|---|---|
 | F0 | Setup (repo, entorno, DB, rol read-only) | ✅ Terminada | 4/4 verdes |
-| F1 | Core CLI (NL→SQL→ejecutar→tabla) | Construida (falta prueba en vivo) | 13/13 verdes (offline+DB) |
+| F1 | Core CLI (NL→SQL→ejecutar→tabla) | ✅ Terminada (vivo) | 17/17 + prueba en vivo |
 | F2 | Guardrails de seguridad | Pendiente | — |
 | F3 | Auto-corrección | Pendiente | — |
 | F4 | Router de formato (texto/gráfica/Excel) | Pendiente | — |
@@ -56,6 +56,11 @@
 - El arquitecto había marcado eso como "defecto de datos" con tests `xfail`; era su propio
   bug. Tests reescritos a aserciones estrictas. **17/17 verdes.**
 - `get_schema()` ahora abre su propia conexión read-only si no hay cache (arregla el CLI).
+- **Prueba en vivo OK** con la key real: "¿cuántos pedidos?" → COUNT = 830; "top 5 clientes
+  por facturación" → 3 joins por FK + interpretación del glosario (unit_price*quantity*(1-discount))
+  → QUICK-Stop $110.277, etc. Claude usa las FK que arreglé para los joins.
+- Trampa de infra: al editar `.env` para pegar la key, se sobrescribió `DATABASE_URL` con el
+  placeholder; se restauró reejecutando `setup_db.py` (idempotente).
 
 ## Accesos y enlaces
 - Repo local: `/Users/davidhoyos/Clientes/AskDB`
