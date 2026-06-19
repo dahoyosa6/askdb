@@ -121,3 +121,8 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   duplicadas (joins). Si el modelo pone su propio LIMIT, se respeta (cap duro en v2). (Fase 2.)
 - 2026-06-19 — **DoS por funciones (`pg_sleep`) se mitiga con `statement_timeout` (8s)**, no en la
   capa de validación de la app (esa capa solo bloquea escritura/DDL). (Fase 2.)
+- 2026-06-19 — **Auto-corrección: `max_sql_retries` (=3) = 3 intentos de generación EN TOTAL**
+  (incluye el primero), no "1 intento + 3 reintentos". Al fallar un intento (`SQLValidationError`
+  o `psycopg.Error`), se reinyecta el error saneado como `error_feedback` al siguiente
+  `generate_sql`. Al agotar los 3, se devuelve un mensaje claro en español SIN SQL crudo ni error
+  interno (el error real solo se loguea del lado servidor). (Fase 3.)

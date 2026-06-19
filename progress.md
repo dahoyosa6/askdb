@@ -3,10 +3,10 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 2 COMPLETA ✅ (guardrails) → siguiente: Fase 3 (auto-corrección).
-- **% MVP:** ~36%.
-- **Próximo paso:** Fase 3 — loop de auto-corrección en `execute.py` (`answer_question`):
-  si el SQL falla, pasar el error de Postgres a Claude y reintentar (≤3); mensaje claro si agota.
+- **Fase actual:** Fase 3 COMPLETA ✅ (auto-corrección) → siguiente: Fase 4 (router de formato).
+- **% MVP:** ~45%.
+- **Próximo paso:** Fase 4 — router de formato de salida (texto / gráfica PNG / Excel-CSV)
+  en `app/output/` (chart, spreadsheet, router), decidido según forma del resultado.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -14,7 +14,7 @@
 | F0 | Setup (repo, entorno, DB, rol read-only) | ✅ Terminada | 4/4 verdes |
 | F1 | Core CLI (NL→SQL→ejecutar→tabla) | ✅ Terminada (vivo) | 17/17 + prueba en vivo |
 | F2 | Guardrails de seguridad | ✅ Terminada | 41/41 (validador) + e2e timeout |
-| F3 | Auto-corrección | Pendiente | — |
+| F3 | Auto-corrección | ✅ Terminada | 63/63 (5 nuevos, mockeados) |
 | F4 | Router de formato (texto/gráfica/Excel) | Pendiente | — |
 | F5 | Memoria conversacional | Pendiente | — |
 | F6 | Bot Telegram (texto) | Pendiente | — |
@@ -49,18 +49,39 @@
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
 - [ ] (Fase 8) Crear cuenta/keys de Telegram (BotFather) y Groq cuando lleguemos a esas fases.
 
-## Para la PRÓXIMA sesión (Fase 3 — auto-corrección)
-- **Objetivo:** en `app/agent/execute.py`, añadir `answer_question(question, chat_id=None)` que
-  orqueste: generar SQL → validar → ejecutar; si falla (psycopg.Error o SQLValidationError),
-  pasar el error saneado a `generate_sql(..., error_feedback=...)` y reintentar hasta
-  `settings.max_sql_retries` (3). Si se agotan, devolver un mensaje claro (nunca stacktrace).
-- `generate_sql` YA soporta `error_feedback` (se construyó pensando en esto).
-- Refactor: el CLI (`app/cli.py`) debería llamar a `answer_question` en vez de cablear los
-  pasos a mano (hoy hace generate→validate→run inline).
-- Tests (mockear Anthropic): 1er SQL inválido (columna inexistente → error PG) → 2º válido
-  converge en ≤3; agotar reintentos → mensaje de fallo SIN el error crudo.
+## Para la PRÓXIMA sesión (Fase 4 — router de formato de salida)
+- **Objetivo:** elegir automáticamente el formato según el resultado: un dato → texto;
+  tendencia/ranking → gráfica PNG (matplotlib); detalle largo → Excel/CSV (pandas+openpyxl).
+- Construir `app/output/{chart.py, spreadsheet.py, router.py}`. El router recibe
+  `(columns, rows)` (o el `AnswerResult`) y devuelve qué formato + el artefacto generado.
+- Integrar en el pipeline: `answer_question` ya devuelve `AnswerResult(columns, rows, sql)`;
+  decidir si el router se llama dentro de `answer_question` o en la capa de interfaz (el CLI/bot).
+  Recomendación: mantener `answer_question` puro (datos) y poner el router en la capa de salida.
+- Tests: dataset de 1 fila/1 col → texto; serie temporal/ranking → gráfica; muchas filas → Excel.
+  Usar `settings.chart_max_rows` y `settings.table_max_rows_text` (ya existen en config).
 - Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md` del proyecto; `source venv/bin/activate`;
-  `pytest` debe dar 58/58 antes de tocar nada.
+  `pytest` debe dar **63/63** antes de tocar nada. Código clave: `app/agent/execute.py`
+  (`answer_question`, `AnswerResult`), `app/cli.py`, `config.py`.
+
+## Bitácora Fase 3 (auto-corrección)
+### 2026-06-19
+- `app/agent/execute.py`: dataclass `AnswerResult` (ok, columns, rows, sql, attempts, error_message)
+  + `answer_question(question, chat_id=None, *, client=None)` que orquesta generar→validar→ejecutar
+  con bucle de auto-corrección. Captura `(SQLValidationError, psycopg.Error)`, loguea el detalle del
+  lado servidor y reinyecta el error **saneado** (`str(exc)` recortado a 500 chars) como
+  `error_feedback` al siguiente `generate_sql`. (delegado a code-architect, verificado por el Head.)
+- **Decisión de semántica del tope:** `settings.max_sql_retries` (=3) se interpreta como
+  **3 intentos de generación EN TOTAL incluyendo el primero** (no 1+3), para "converger en ≤3".
+  Registrado también en el PRD.
+- **Seguridad:** al usuario nunca le llega SQL crudo ni el error de Postgres; si se agotan los
+  intentos devuelve `ok=False` con un `error_message` fijo en español (sin stacktrace).
+- `app/cli.py` refactorizado: delega TODO a `answer_question`; imprime SQL + tabla si `ok=True`,
+  o el mensaje saneado y código de salida 1 si `ok=False`. Uso vacío sigue devolviendo 2.
+- Tests nuevos (Anthropic y DB mockeados, sin red): caso feliz (attempts=1, sin feedback);
+  convergencia tras `psycopg.Error` verificando que el 2º generate recibió el error; convergencia
+  tras `SQLValidationError`; agotar reintentos sin filtrar error crudo/SQL/Traceback; no crear
+  cliente real si se inyecta. **Suite total: 63/63 verdes.** No se ejecutó el CLI en vivo.
+- `chat_id` queda reservado (sin usar) para la memoria de Fase 5. Sin dependencias nuevas.
 
 ## Bitácora Fase 1
 ### 2026-06-19
