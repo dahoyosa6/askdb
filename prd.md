@@ -113,3 +113,11 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
 ## 10. Registro de cambios al PRD
 - 2026-06-19 — Creación del PRD desde el spec madre.
 - 2026-06-19 — **DB cambia de Supabase a Neon** (límite free tier de Supabase; Neon gratis y aislado).
+- 2026-06-19 — **Introspección de esquema vía `pg_catalog`, no `information_schema`**: bajo un rol
+  de solo-SELECT, las vistas de constraints de `information_schema` salen vacías; sin esto Claude
+  no vería PK/FK y alucinaría los joins. (Decisión técnica, Fase 1.)
+- 2026-06-19 — **Inyección de LIMIT por append, no por envoltura**: añadir `LIMIT n` al final solo
+  si no hay LIMIT a nivel superior. Envolver en subconsulta rompía `SELECT *` con columnas
+  duplicadas (joins). Si el modelo pone su propio LIMIT, se respeta (cap duro en v2). (Fase 2.)
+- 2026-06-19 — **DoS por funciones (`pg_sleep`) se mitiga con `statement_timeout` (8s)**, no en la
+  capa de validación de la app (esa capa solo bloquea escritura/DDL). (Fase 2.)

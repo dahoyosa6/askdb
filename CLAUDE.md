@@ -33,6 +33,17 @@ DB: **Neon Postgres** (free). Hosting: **Railway**. Repo: GitHub público.
 - **psycopg3 directo + pool**, no ORM: control fino de `statement_timeout` y `SET TRANSACTION READ ONLY`.
 - **Cache de esquema** (Northwind es estático): menos tokens y prefijo estable para prompt-caching de Claude.
 - **transcribe() como interfaz** intercambiable: Groq Whisper hoy; cambiar proveedor no toca el bot.
+- **2026-06-19 · Introspección vía `pg_catalog`, no `information_schema`.** Bajo el rol de
+  solo-SELECT, `information_schema.table_constraints/key_column_usage` salen VACÍAS (solo muestran
+  constraints de tablas con privilegio distinto de SELECT). Sin esto Claude no ve PK/FK. `schema.py`
+  lee de `pg_catalog` (visible para todos). **Trampa a recordar** para futuros agentes read-only.
+- **2026-06-19 · LIMIT por append + statement_timeout para DoS.** El validador añade `LIMIT` al
+  final (no envuelve, rompía joins con columnas duplicadas); `pg_sleep` y consultas pesadas las
+  corta el `statement_timeout` (8s), no el validador.
+
+## Estado por fases (resumen; detalle en progress.md)
+- F0 Setup ✅ · F1 Core CLI ✅ (vivo) · F2 Guardrails ✅ (58 tests) · **F3 Auto-corrección → siguiente**
+- F4 Formato · F5 Memoria · F6 Telegram · F7 Voz · F8 Railway → pendientes.
 
 ## Cómo correrlo (local)
 ```bash

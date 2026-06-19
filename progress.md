@@ -43,9 +43,24 @@
 
 ## Pendientes para David
 - [x] Crear proyecto Neon `askdb` y pegar `NEON_ADMIN_URL` (hecho; DB cargada).
-- [ ] **Rotar la API key de Anthropic y pegar la REAL en `.env`** (`ANTHROPIC_API_KEY=sk-ant-...`).
-      Sigue el placeholder → la prueba en vivo de Fase 1 da 401.
-- [ ] ¿Crear el repo público en GitHub y subir? (el Head lo hace con `gh` cuando confirmes).
+- [x] Rotar la API key de Anthropic y pegar la REAL en `.env` (hecha; prueba en vivo OK).
+- [x] Crear el repo público en GitHub y subir (hecho: github.com/dahoyosa6/askdb, rama `main`).
+- [ ] (Recordatorio higiene) Al editar `.env`, cambiar SOLO la línea necesaria; no reemplazar
+      todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
+- [ ] (Fase 8) Crear cuenta/keys de Telegram (BotFather) y Groq cuando lleguemos a esas fases.
+
+## Para la PRÓXIMA sesión (Fase 3 — auto-corrección)
+- **Objetivo:** en `app/agent/execute.py`, añadir `answer_question(question, chat_id=None)` que
+  orqueste: generar SQL → validar → ejecutar; si falla (psycopg.Error o SQLValidationError),
+  pasar el error saneado a `generate_sql(..., error_feedback=...)` y reintentar hasta
+  `settings.max_sql_retries` (3). Si se agotan, devolver un mensaje claro (nunca stacktrace).
+- `generate_sql` YA soporta `error_feedback` (se construyó pensando en esto).
+- Refactor: el CLI (`app/cli.py`) debería llamar a `answer_question` en vez de cablear los
+  pasos a mano (hoy hace generate→validate→run inline).
+- Tests (mockear Anthropic): 1er SQL inválido (columna inexistente → error PG) → 2º válido
+  converge en ≤3; agotar reintentos → mensaje de fallo SIN el error crudo.
+- Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md` del proyecto; `source venv/bin/activate`;
+  `pytest` debe dar 58/58 antes de tocar nada.
 
 ## Bitácora Fase 1
 ### 2026-06-19
