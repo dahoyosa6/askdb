@@ -23,6 +23,7 @@ from app.agent.execute import run_query
 from app.agent.generate_sql import generate_sql, get_client
 from app.agent.glossary import get_glossary
 from app.agent.schema import get_schema
+from app.agent.validate_sql import SQLValidationError, validate_and_secure
 
 
 def _setup_logging() -> None:
@@ -100,8 +101,20 @@ def main(argv: list[str] | None = None) -> int:
     print("\n--- SQL generado ---")
     print(sql)
 
-    # 3. Ejecutar en modo solo lectura.
-    columns, rows = run_query(sql)
+    # 3. Guardrails: validar y asegurar (solo SELECT, una sentencia, LIMIT).
+    try:
+        safe_sql = validate_and_secure(sql)
+    except SQLValidationError as exc:
+        logging.warning("SQL rechazado por los guardrails: %s", exc)
+        print(f"\n⚠️  La consulta no pasó los guardrails de seguridad: {exc}")
+        return 1
+
+    if safe_sql != sql:
+        print("\n--- SQL asegurado (con LIMIT) ---")
+        print(safe_sql)
+
+    # 4. Ejecutar en modo solo lectura.
+    columns, rows = run_query(safe_sql)
 
     print("\n--- Resultados ---")
     print(_render_table(columns, rows))

@@ -3,17 +3,17 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 1 COMPLETA ✅ (probada en vivo) → siguiente: Fase 2 (guardrails).
-- **% MVP:** ~28%.
-- **Próximo paso:** Fase 2 — validador de SQL (`validate_sql.py`): solo SELECT/CTE, una
-  sentencia, bloquear DDL/DML, inyectar LIMIT. Tests de "DELETE bloqueado por app".
+- **Fase actual:** Fase 2 COMPLETA ✅ (guardrails) → siguiente: Fase 3 (auto-corrección).
+- **% MVP:** ~36%.
+- **Próximo paso:** Fase 3 — loop de auto-corrección en `execute.py` (`answer_question`):
+  si el SQL falla, pasar el error de Postgres a Claude y reintentar (≤3); mensaje claro si agota.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
 |---|---|---|---|
 | F0 | Setup (repo, entorno, DB, rol read-only) | ✅ Terminada | 4/4 verdes |
 | F1 | Core CLI (NL→SQL→ejecutar→tabla) | ✅ Terminada (vivo) | 17/17 + prueba en vivo |
-| F2 | Guardrails de seguridad | Pendiente | — |
+| F2 | Guardrails de seguridad | ✅ Terminada | 41/41 (validador) + e2e timeout |
 | F3 | Auto-corrección | Pendiente | — |
 | F4 | Router de formato (texto/gráfica/Excel) | Pendiente | — |
 | F5 | Memoria conversacional | Pendiente | — |
@@ -61,6 +61,19 @@
   → QUICK-Stop $110.277, etc. Claude usa las FK que arreglé para los joins.
 - Trampa de infra: al editar `.env` para pegar la key, se sobrescribió `DATABASE_URL` con el
   placeholder; se restauró reejecutando `setup_db.py` (idempotente).
+- Repo en GitHub (público), rama renombrada `master`→`main` (default actualizado).
+
+## Bitácora Fase 2 (guardrails)
+### 2026-06-19
+- `app/agent/validate_sql.py`: `validate_and_secure()` — quita comentarios, exige una sola
+  sentencia, solo SELECT/WITH, bloquea keywords de escritura/DDL/admin por TOKEN (no por texto,
+  para no romper literales), e inyecta LIMIT (cap settings.query_row_hard_cap=1000) si falta.
+  Respeta un LIMIT propio del modelo (decisión v1). Cableado en `app/cli.py`.
+- **Tester-expert (adversarial):** 41 tests, 0 agujeros. Probó data-modifying CTEs de Postgres
+  (`WITH x AS (DELETE...RETURNING) SELECT`) en variantes de mayúsculas/espacios → todos BLOQUEADOS.
+- Observación: `SELECT pg_sleep(N)` pasa la app (no escribe) pero lo mata el `statement_timeout`
+  de 8s → verificado e2e (cortado a 9s con QueryCanceled). Defensa en profundidad OK.
+- **Suite total: 58/58 verdes.**
 
 ## Accesos y enlaces
 - Repo local: `/Users/davidhoyos/Clientes/AskDB`
