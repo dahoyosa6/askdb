@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+import anthropic
 import psycopg
 from psycopg_pool import ConnectionPool
 
@@ -51,6 +52,35 @@ _MENSAJE_FALLO = (
     "Intenta reformularla de otra manera o sé más específico."
 )
 
+# Mensaje específico cuando el servicio de IA está saturado o no responde
+# (429/timeout/caída de red). Sigue siendo saneado: no expone detalles internos.
+_MENSAJE_SATURADO = (
+    "El servicio está saturado en este momento. Intenta de nuevo en un momento."
+)
+
+# Errores RECUPERABLES dentro del loop de auto-corrección: además de los de
+# validación (app) y los de Postgres (DB), un `RuntimeError` de `generate_sql`
+# (el modelo no devolvió un bloque tool_use válido) y toda la jerarquía de errores
+# del SDK de Anthropic (`anthropic.APIError` cubre RateLimit, APIConnection,
+# APIStatus, APITimeout, etc.). NUNCA se propagan al llamador: o se reintenta, o
+# se devuelve `ok=False` con un mensaje saneado.
+_ERRORES_RECUPERABLES = (
+    SQLValidationError,
+    psycopg.Error,
+    RuntimeError,
+    anthropic.APIError,
+)
+
+# Errores de la API de Anthropic que indican saturación/indisponibilidad temporal
+# (no un fallo del SQL): merecen el mensaje "saturado" en vez del genérico.
+_ERRORES_SATURACION = (
+    anthropic.RateLimitError,
+    anthropic.APITimeoutError,
+    anthropic.APIConnectionError,
+    anthropic.InternalServerError,
+    anthropic.OverloadedError,
+)
+
 # Pool singleton perezoso. Se crea en el primer uso y se reutiliza.
 _POOL: ConnectionPool | None = None
 
@@ -74,6 +104,13 @@ def get_pool() -> ConnectionPool:
             min_size=settings.db_pool_min,
             max_size=settings.db_pool_max,
             open=True,
+            # Neon free PAUSA la base por inactividad: tras despertar, las
+            # conexiones del pool pueden quedar muertas. `check` valida (y recicla
+            # si hace falta) cada conexión al sacarla, para que el "primer mensaje
+            # tras inactividad" no falle con una conexión zombi. `max_idle` corto
+            # cierra las conexiones ociosas antes de que Neon las mate.
+            check=ConnectionPool.check_connection,
+            max_idle=120.0,
         )
     return _POOL
 
@@ -114,6 +151,12 @@ def run_query(sql: str) -> tuple[list[str], list[tuple]]:
 
                 # cur.description es None para sentencias sin resultado; aquí
                 # esperamos siempre un SELECT, pero lo manejamos con cuidado.
+                #
+                # Límite conocido (v2): tipos exóticos de Postgres (arrays, JSON,
+                # bytea, rangos) llegan como objetos Python que el router renderiza
+                # con str() y pueden verse feos (p. ej. bytea -> "b'\\x...'"), o no
+                # graficarse. Northwind no los usa; al conectar datos reales del
+                # cliente habrá que darles un formato amable.
                 columns = [desc.name for desc in cur.description] if cur.description else []
                 rows = cur.fetchall() if cur.description else []
 
@@ -216,6 +259,9 @@ def answer_question(
 
     max_intentos = settings.max_sql_retries
     error_feedback: str | None = None
+    # Mensaje saneado a devolver si se agotan los intentos. Por defecto el
+    # genérico; un error de saturación de la API lo cambia al específico.
+    mensaje_fallo = _MENSAJE_FALLO
 
     for intento in range(1, max_intentos + 1):
         try:
@@ -232,16 +278,35 @@ def answer_question(
             safe_sql = validate_and_secure(sql)
             # 3. Ejecutar en modo solo lectura.
             columns, rows = run_query(safe_sql)
-        except (SQLValidationError, psycopg.Error) as exc:
+        except _ERRORES_RECUPERABLES as exc:
             # Fallo recuperable: lo logueamos del lado servidor y preparamos el
-            # feedback saneado para que el siguiente intento corrija.
+            # feedback saneado para que el siguiente intento corrija. Cubre tanto
+            # errores del SQL (validación/Postgres) como fallos de la API de IA
+            # (Anthropic) o un tool_use ausente (RuntimeError de generate_sql).
+            # NUNCA se propaga: la regla dura es que un 429/timeout/5xx de la API
+            # no tumbe el turno ni reviente el CLI.
             error_feedback = _sanear_error(exc)
+            # Para errores de saturación de la API guardamos su request_id (si lo
+            # expone el SDK) para observabilidad, y recordamos el mensaje "saturado".
+            extra = ""
+            if isinstance(exc, _ERRORES_SATURACION):
+                mensaje_fallo = _MENSAJE_SATURADO
+                request_id = getattr(exc, "_request_id", None)
+                if request_id:
+                    extra = f" [request_id={request_id}]"
+            elif isinstance(exc, anthropic.APIError):
+                # Otros errores del SDK (4xx no recuperables, validación, etc.):
+                # también logueamos el request_id para soporte.
+                request_id = getattr(exc, "_request_id", None)
+                if request_id:
+                    extra = f" [request_id={request_id}]"
             logger.warning(
-                "answer_question: intento %d/%d falló (%s): %s",
+                "answer_question: intento %d/%d falló (%s): %s%s",
                 intento,
                 max_intentos,
                 exc.__class__.__name__,
                 error_feedback,
+                extra,
             )
             continue
 
@@ -270,5 +335,5 @@ def answer_question(
     return AnswerResult(
         ok=False,
         attempts=max_intentos,
-        error_message=_MENSAJE_FALLO,
+        error_message=mensaje_fallo,
     )

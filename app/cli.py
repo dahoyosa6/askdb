@@ -86,7 +86,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # Todo el pipeline (generar -> validar -> ejecutar, con auto-corrección)
     # vive en answer_question. La CLI solo presenta el resultado.
-    result = answer_question(question)
+    #
+    # answer_question ya sanea sus errores recuperables (devuelve ok=False), pero
+    # envolvemos por si acaso: un fallo inesperado no debe reventar el CLI con un
+    # stacktrace feo. La CLI es herramienta de dev, así que mostrar el tipo de
+    # error es aceptable, pero sin tumbar el proceso de mala manera.
+    try:
+        result = answer_question(question)
+    except Exception as exc:  # noqa: BLE001 - frontera del CLI
+        logging.getLogger(__name__).exception("Fallo inesperado en answer_question.")
+        print(f"\nNo se pudo procesar la pregunta: {exc.__class__.__name__}.")
+        return 1
 
     if not result.ok:
         # Mensaje saneado para el usuario (nunca SQL crudo ni error interno).

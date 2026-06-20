@@ -83,6 +83,26 @@ def test_limit_respeta_max_limit_parametro():
     assert "LIMIT 10" in out.upper()
 
 
+def test_respeta_fetch_first_y_no_inyecta_limit():
+    """`FETCH FIRST n ROWS ONLY` cuenta como tope: NO se le añade un LIMIT extra.
+
+    Si se inyectara `LIMIT` tras `FETCH FIRST ... ROWS ONLY` el SQL sería inválido
+    en Postgres (M3). El validador debe detectar el FETCH a nivel superior.
+    """
+    out = validate_and_secure("SELECT * FROM orders ORDER BY order_id FETCH FIRST 5 ROWS ONLY")
+    assert "LIMIT" not in out.upper()
+    assert "FETCH" in out.upper()
+
+
+def test_fetch_first_con_offset_no_inyecta_limit():
+    """`OFFSET ... FETCH FIRST ... ROWS ONLY` también cuenta como tope."""
+    out = validate_and_secure(
+        "SELECT * FROM orders ORDER BY order_id OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY"
+    )
+    assert "LIMIT" not in out.upper()
+    assert "FETCH" in out.upper()
+
+
 # ---------------------------------------------------------------------------
 # 3. BLOQUEA — escrituras, DDL y comandos admin (deben lanzar)
 # ---------------------------------------------------------------------------
@@ -242,3 +262,49 @@ def test_documenta_pg_sleep_pasa_la_capa_de_app():
     """pg_sleep no es escritura → la capa de app lo acepta (mitigado por timeout)."""
     out = validate_and_secure("SELECT pg_sleep(10)")
     assert "PG_SLEEP" in out.upper()
+
+
+# ---------------------------------------------------------------------------
+# 8. DENYLIST DE FUNCIONES PELIGROSAS (defensa en profundidad — §5 del tester)
+# ---------------------------------------------------------------------------
+# Estas funciones leen archivos del servidor o hacen IO de red. NO modifican
+# datos (no violan read-only), así que pasaban el validador y solo las cortaba el
+# rol DB. Ahora la APP es también barrera: las rechaza por NOMBRE de función.
+
+FUNCIONES_PELIGROSAS = [
+    pytest.param("SELECT pg_read_file('/etc/passwd')", id="pg_read_file"),
+    pytest.param("SELECT pg_read_binary_file('/etc/hosts')", id="pg_read_binary_file"),
+    pytest.param("SELECT pg_ls_dir('/')", id="pg_ls_dir"),
+    pytest.param("SELECT lo_import('/etc/hosts')", id="lo_import"),
+    pytest.param("SELECT lo_export(1, '/tmp/x')", id="lo_export"),
+    pytest.param("SELECT * FROM dblink('host=x', 'SELECT 1') AS t(a int)", id="dblink"),
+]
+
+
+@pytest.mark.parametrize("sql", FUNCIONES_PELIGROSAS)
+def test_bloquea_funciones_peligrosas_por_nombre(sql):
+    """Funciones de lectura de archivos / IO de red se rechazan en la capa app."""
+    with pytest.raises(SQLValidationError):
+        validate_and_secure(sql)
+
+
+def test_pg_shadow_pasa_la_capa_de_app():
+    """pg_shadow es una VISTA, no una función: la app la deja pasar (la corta el rol DB)."""
+    out = validate_and_secure("SELECT * FROM pg_shadow")
+    assert out.strip()
+
+
+def test_denylist_no_falso_positivo_en_literal():
+    """El nombre de una función peligrosa DENTRO de un literal NO debe bloquearse."""
+    out = validate_and_secure(
+        "SELECT * FROM products WHERE product_name = 'pg_read_file backup'"
+    )
+    assert out.strip()
+
+
+def test_denylist_no_bloquea_columna_parecida():
+    """Una columna/identificador que NO es una llamada a función no se bloquea."""
+    # 'lo_importante' contiene 'lo_import' como substring: la detección por token
+    # de nombre completo NO debe confundirlos.
+    out = validate_and_secure("SELECT lo_importante FROM productos")
+    assert out.strip()

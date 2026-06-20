@@ -106,31 +106,38 @@ def _formatear_texto(columns: list[str], rows: list[tuple]) -> str:
 
     Cubre los casos que la heurística manda a texto:
     - 0 filas -> mensaje de vacío.
-    - 1 fila x 1 col -> frase "El <columna> es <valor>.".
+    - 1 fila x 1 col -> SOLO el valor (sin reconstruir "El <columna> es ...", que
+      filtraba nombres técnicos de columna en inglés al usuario; B1).
     - 1 fila x N cols -> ficha "col: valor · col: valor".
-    - varias filas -> tabla ASCII compacta (columna(s) corta(s)).
+    - varias filas -> una entrada por registro, legible en texto plano (sin tabla
+      con '|', que se desalinea en la fuente proporcional de Telegram; I2).
     """
     if len(rows) == 0:
-        return "No se encontraron resultados."
+        return "No encontré datos para esa pregunta."
 
     if len(rows) == 1:
         fila = rows[0]
         if len(columns) == 1:
-            return f"El {columns[0]} es {_valor_legible(fila[0])}."
+            # B1: el caso más común ("¿cuántos pedidos hay?"). Devolvemos solo el
+            # valor formateado; no exponemos el nombre técnico de la columna.
+            return f"{_valor_legible(fila[0])}."
         partes = [f"{col}: {_valor_legible(val)}" for col, val in zip(columns, fila)]
         return " · ".join(partes)
 
-    # Varias filas: lista/tabla compacta.
+    # Varias filas, 1 columna: lista simple.
     if len(columns) == 1:
         lineas = [f"- {_valor_legible(fila[0])}" for fila in rows]
-        return f"{columns[0]}:\n" + "\n".join(lineas)
+        return "\n".join(lineas)
 
-    # Varias filas y columnas: tabla simple separada por " | ".
-    encabezado = " | ".join(columns)
-    lineas = [encabezado]
+    # I2: varias filas y columnas. En vez de una tabla con '|' (que se desalinea en
+    # Telegram), una entrada por registro: cada fila como "col: val · col: val",
+    # separadas por una línea en blanco. Se ve bien en CLI y en Telegram sin
+    # depender de parse_mode.
+    bloques = []
     for fila in rows:
-        lineas.append(" | ".join(_valor_legible(v) for v in fila))
-    return "\n".join(lineas)
+        partes = [f"{col}: {_valor_legible(val)}" for col, val in zip(columns, fila)]
+        bloques.append(" · ".join(partes))
+    return "\n\n".join(bloques)
 
 
 def elegir_formato(columns: list[str], rows: list[tuple]) -> str:
@@ -231,8 +238,10 @@ def enrutar_salida(
             ruta = chart.generar_grafica(columns, rows, tipo=tipo)
             return OutputResult(
                 kind="chart",
+                # I1: caption humano. No exponemos los nombres crudos de columna
+                # (en inglés, técnicos) al usuario.
                 file_path=ruta,
-                caption=f"{columns[0]} / {columns[1]}",
+                caption="Aquí tienes la gráfica de tu consulta.",
             )
         except Exception as exc:  # noqa: BLE001 - fallback de seguridad a propósito
             # Regla dura: nunca propagar el error al usuario. Log servidor + texto.
@@ -244,8 +253,9 @@ def enrutar_salida(
         ruta = spreadsheet.generar_excel(columns, rows)
         return OutputResult(
             kind="excel",
+            # I1: caption humano que dice QUÉ contiene el archivo, sin jerga de DB.
             file_path=ruta,
-            caption=f"{len(rows)} filas · {len(columns)} columnas",
+            caption=f"Te adjunto el detalle completo ({len(rows)} resultados) en Excel.",
         )
     except Exception as exc:  # noqa: BLE001 - fallback de seguridad a propósito
         logger.error("enrutar_salida: falló la generación de Excel, caigo a texto: %s", exc)

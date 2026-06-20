@@ -55,8 +55,10 @@ pytest                          # pruebas
 
 ## Estado
 
-En construcción por fases (setup → core CLI → guardrails → auto-corrección → formatos →
-memoria → bot Telegram → voz → despliegue). Ver `progress.md`.
+**MVP funcional completo:** texto y voz por Telegram, seguro (validación + LIMIT + rol
+read-only, con allowlist y rate limit), con memoria conversacional y formato automático
+(texto / gráfica / Excel). Suite de 128+ pruebas en verde. **Pendiente:** el despliegue en
+Railway (Fase 8). Ver `progress.md` para el detalle por fase.
 
 ---
 

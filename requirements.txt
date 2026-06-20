@@ -6,7 +6,7 @@ anthropic>=0.69,<1.0
 # Bot de Telegram (Fase 6)
 python-telegram-bot>=21.6,<22
 
-# Base de datos Postgres (Supabase)
+# Base de datos Postgres (Neon)
 psycopg[binary]>=3.2,<4
 psycopg_pool>=3.2,<4
 
@@ -31,3 +31,4 @@ python-dotenv>=1.0,<2
 
 # Tests
 pytest>=8.0,<9
+pytest-asyncio>=0.24,<1  # dev: pruebas de los handlers async de Telegram

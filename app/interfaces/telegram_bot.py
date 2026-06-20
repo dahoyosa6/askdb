@@ -56,7 +56,8 @@ logger = logging.getLogger(__name__)
 # contener SQL crudo, el error interno ni un stacktrace (regla dura): esos
 # detalles solo van al log del servidor.
 _MENSAJE_GENERICO = (
-    "Ocurrió un problema procesando tu pregunta. Intenta reformularla."
+    "Uy, no pude resolver esa pregunta. Intenta decirla de otra forma, más "
+    "concreta (por ejemplo, nombrando el dato o el periodo)."
 )
 
 # --- Textos de los comandos (en español, lenguaje claro para Marta) ---
@@ -230,6 +231,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     ante cualquier error se loguea el stacktrace EN EL SERVIDOR y al usuario solo
     le llega un mensaje genérico saneado (nunca el error ni el SQL).
     """
+    # Guard (M1): PTB puede entregar updates sin message/effective_chat (ediciones,
+    # ciertos tipos). Si falta cualquiera, no hay nada que procesar.
+    if update.effective_chat is None or update.message is None:
+        return
     chat_id = update.effective_chat.id
 
     # 1. Allowlist: solo responden los chats autorizados.
@@ -281,6 +286,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     stacktraces se loguean SOLO del lado servidor y al usuario le llega un mensaje
     saneado.
     """
+    # Guard (M1): sin message/effective_chat no hay nota de voz que procesar.
+    if update.effective_chat is None or update.message is None:
+        return
     chat_id = update.effective_chat.id
 
     # 1. Allowlist: solo responden los chats autorizados.
@@ -334,6 +342,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/start: bienvenida y explicación de cómo usar el bot."""
+    if update.effective_chat is None:
+        return
     chat_id = update.effective_chat.id
     if not is_allowed(chat_id, settings.allowed_chat_ids):
         logger.warning("/start de chat NO autorizado: %s", chat_id)
@@ -344,6 +354,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/help: ejemplos de preguntas reales y lista de comandos."""
+    if update.effective_chat is None:
+        return
     chat_id = update.effective_chat.id
     if not is_allowed(chat_id, settings.allowed_chat_ids):
         logger.warning("/help de chat NO autorizado: %s", chat_id)
@@ -358,6 +370,8 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     `memory.reset` es una operación en RAM (rápida), así que se llama directo, sin
     pasar por un hilo aparte.
     """
+    if update.effective_chat is None:
+        return
     chat_id = update.effective_chat.id
     if not is_allowed(chat_id, settings.allowed_chat_ids):
         logger.warning("/reset de chat NO autorizado: %s", chat_id)

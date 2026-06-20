@@ -17,6 +17,8 @@ Verifican:
 
 from __future__ import annotations
 
+import anthropic
+import httpx
 import psycopg
 import pytest
 
@@ -24,6 +26,14 @@ import app.agent.execute as execute
 from app.agent.execute import answer_question
 from app.agent.validate_sql import SQLValidationError
 from config import settings
+
+
+def _rate_limit_error(request_id: str | None = None) -> anthropic.RateLimitError:
+    """Construye un RateLimitError del SDK de Anthropic (con request_id opcional)."""
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    headers = {"request-id": request_id} if request_id else {}
+    resp = httpx.Response(429, request=req, headers=headers)
+    return anthropic.RateLimitError("rate limited", response=resp, body=None)
 
 # Objeto centinela: representa el cliente Anthropic. Como generate_sql está
 # monkeypatcheado, su valor real da igual; sirve para evitar get_client().
@@ -188,6 +198,97 @@ def test_no_crea_cliente_real_si_se_inyecta(monkeypatch):
 
     result = answer_question("hola", client=SENTINEL_CLIENT)
     assert result.ok is True
+
+
+# ---------------------------------------------------------------------------
+# A2 — robustez ante errores de la API de Anthropic / RuntimeError.
+# Ninguno debe PROPAGARSE fuera de answer_question; se tratan como intento
+# recuperable y, si se agotan, se devuelve ok=False con mensaje saneado.
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_error_de_generate_no_se_propaga(monkeypatch):
+    """Un RuntimeError de generate_sql (tool_use ausente) es recuperable."""
+    spy = _GenerateSpy(["SELECT count(*) AS total FROM orders"])
+
+    calls = {"n": 0}
+
+    def generate_que_falla_primero(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("El modelo no devolvió un bloque tool_use válido")
+        return spy(*args, **kwargs)
+
+    monkeypatch.setattr(execute, "generate_sql", generate_que_falla_primero)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    result = answer_question("¿cuántos pedidos?", client=SENTINEL_CLIENT)
+
+    assert result.ok is True
+    assert result.attempts == 2
+
+
+def test_rate_limit_anthropic_no_se_propaga_y_da_mensaje_saturado(monkeypatch):
+    """Si la API agota los intentos por saturación -> ok=False, mensaje 'saturado'."""
+    n = settings.max_sql_retries
+
+    def siempre_rate_limit(*args, **kwargs):
+        raise _rate_limit_error()
+
+    monkeypatch.setattr(execute, "generate_sql", siempre_rate_limit)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    # No debe lanzar: se sanea a ok=False.
+    result = answer_question("¿cuántos pedidos?", client=SENTINEL_CLIENT)
+
+    assert result.ok is False
+    assert result.attempts == n
+    msg = result.error_message or ""
+    assert "saturado" in msg.lower()
+    # Nunca fuga el detalle interno ni un stacktrace.
+    assert "Traceback" not in msg
+    assert "RateLimit" not in msg
+    assert "429" not in msg
+
+
+def test_error_anthropic_transitorio_se_reintenta_y_converge(monkeypatch):
+    """Un fallo de la API en el 1er intento y éxito en el 2º -> ok=True."""
+    sqls = ["SELECT count(*) AS total FROM orders"]
+    estado = {"n": 0}
+
+    def generate(*args, **kwargs):
+        estado["n"] += 1
+        if estado["n"] == 1:
+            raise _rate_limit_error(request_id="req_abc123")
+        return sqls[0]
+
+    monkeypatch.setattr(execute, "generate_sql", generate)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    result = answer_question("¿cuántos pedidos?", client=SENTINEL_CLIENT)
+
+    assert result.ok is True
+    assert result.attempts == 2
+
+
+def test_api_status_error_no_se_propaga(monkeypatch):
+    """Un APIStatusError (5xx) tampoco se propaga: ok=False saneado."""
+
+    def siempre_5xx(*args, **kwargs):
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        resp = httpx.Response(500, request=req)
+        raise anthropic.InternalServerError("boom", response=resp, body=None)
+
+    monkeypatch.setattr(execute, "generate_sql", siempre_5xx)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    result = answer_question("hola", client=SENTINEL_CLIENT)
+    assert result.ok is False
+    assert "saturado" in (result.error_message or "").lower()
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,13 @@
 """Introspección del esquema de la base de datos.
 
-Lee tablas, columnas, tipos, llaves primarias (PK) y foráneas (FK) desde el
-catálogo `information_schema` de Postgres y los convierte en un texto compacto
-tipo DDL listo para inyectar al modelo. Northwind es estático, así que el
-resultado se cachea en memoria y se vuelca a disco (gitignored).
+Lee tablas, columnas y tipos de `information_schema` y las llaves primarias (PK)
+y foráneas (FK) del catálogo del sistema `pg_catalog` de Postgres, y los convierte
+en un texto compacto tipo DDL listo para inyectar al modelo. Northwind es estático,
+así que el resultado se cachea en memoria y se vuelca a disco (gitignored).
+
+NOTA (trampa de la Fase 1): las PK/FK se leen de `pg_catalog`, NO de las vistas de
+constraints de `information_schema`. Esas vistas salen VACÍAS para un rol de
+solo-SELECT (ver el comentario extenso dentro de `introspect_schema`).
 
 Funciones públicas:
 - `introspect_schema(conn)`  -> estructura cruda (dict) del esquema.
@@ -30,7 +34,11 @@ _SCHEMA_CACHE: str | None = None
 
 
 def introspect_schema(conn: psycopg.Connection) -> dict[str, Any]:
-    """Lee la estructura del esquema `public` desde information_schema.
+    """Lee la estructura del esquema `public`.
+
+    Columnas y tipos salen de `information_schema.columns`; las PK/FK salen de
+    `pg_catalog` (las vistas de constraints de information_schema están vacías
+    para el rol de solo-SELECT — ver el comentario más abajo).
 
     Devuelve un dict con esta forma::
 
@@ -178,7 +186,7 @@ def format_schema_for_prompt(schema: dict[str, Any]) -> str:
 
 
 def _shorten_type(data_type: str) -> str:
-    """Abrevia el tipo Postgres de information_schema a una forma corta.
+    """Abrevia el tipo Postgres (de information_schema.columns) a una forma corta.
 
     `character varying` -> `varchar`, `timestamp without time zone` -> `timestamp`,
     etc. Reduce tokens sin perder el significado para generar SQL.

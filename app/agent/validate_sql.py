@@ -11,7 +11,9 @@ Reglas que aplica `validate_and_secure`:
    ALTER, CREATE, TRUNCATE, GRANT, etc.) detectadas como *keywords* del parser
    (no como texto crudo), para no romper literales como `'please delete'`.
 4. Quita comentarios (vector de smuggling) antes de validar.
-5. Inyecta un LIMIT si la consulta no trae uno a nivel superior.
+5. Bloquea por NOMBRE las funciones peligrosas de lectura de archivos / IO de red
+   (defensa en profundidad — ver `FORBIDDEN_FUNCTIONS`).
+6. Inyecta un LIMIT si la consulta no trae uno a nivel superior.
 
 Función pública:
 - `validate_and_secure(sql, max_limit=...)` -> SQL saneado, o lanza SQLValidationError.
@@ -44,6 +46,30 @@ FORBIDDEN_KEYWORDS: frozenset[str] = frozenset(
         "REINDEX", "CLUSTER", "REFRESH", "LOCK", "SET", "RESET", "DISCARD",
         "LISTEN", "NOTIFY", "UNLISTEN", "COMMENT", "SECURITY", "IMPORT",
         "ATTACH", "DETACH", "INTO",  # SELECT ... INTO crea una tabla
+    }
+)
+
+# Funciones peligrosas bloqueadas por NOMBRE (defensa en profundidad).
+#
+# Estas funciones NO modifican datos (no violan la garantía read-only), pero leen
+# archivos del servidor o hacen IO de red. Hoy las corta el rol de DB read-only
+# (verificado en vivo: rebotan con InsufficientPrivilege). Esta denylist convierte
+# la APP en una SEGUNDA barrera real, para el día en que se conecte a una DB de
+# cliente con un rol más permisivo. Se detecta el nombre como token de FUNCIÓN
+# (un Name seguido de '('), insensible a mayúsculas; un mismo nombre dentro de un
+# literal o como identificador suelto NO dispara (no es una llamada).
+#
+# NOTA: `COPY` y `pg_sleep` no están aquí: COPY ya se bloquea como keyword;
+# pg_sleep se mitiga con statement_timeout (decisión documentada). `pg_shadow` es
+# una VISTA (no función) y la corta el rol DB.
+FORBIDDEN_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "pg_read_file",
+        "pg_read_binary_file",
+        "pg_ls_dir",
+        "lo_import",
+        "lo_export",
+        "dblink",
     }
 )
 
@@ -104,6 +130,9 @@ def validate_and_secure(sql: str, *, max_limit: int | None = None) -> str:
         )
 
     # 3. Escanear todos los tokens hoja en busca de keywords prohibidas y de ';'.
+    #    De paso, recogemos los tokens no-espacio para detectar llamadas a
+    #    funciones peligrosas (un Name seguido de '(').
+    tokens_significativos = []
     for token in stmt.flatten():
         if token.ttype is T.Punctuation and token.value == ";":
             raise SQLValidationError("Se detectó ';' (posible múltiple sentencia).")
@@ -114,6 +143,23 @@ def validate_and_secure(sql: str, *, max_limit: int | None = None) -> str:
                     f"Palabra clave no permitida en una consulta de solo lectura: "
                     f"'{word}'."
                 )
+        if not token.is_whitespace:
+            tokens_significativos.append(token)
+
+    # 3b. Denylist de funciones peligrosas por nombre (defensa en profundidad).
+    #     Una llamada a función es un token Name seguido (sin espacios, ya filtrados)
+    #     de un '('. Así un literal 'pg_read_file ...' o una columna 'lo_importante'
+    #     NO disparan (no van seguidos de paréntesis con ese nombre exacto).
+    for actual, siguiente in zip(tokens_significativos, tokens_significativos[1:]):
+        if actual.ttype is T.Name and (
+            siguiente.ttype is T.Punctuation and siguiente.value == "("
+        ):
+            nombre = actual.value.strip('"').lower()
+            if nombre in FORBIDDEN_FUNCTIONS:
+                raise SQLValidationError(
+                    f"Función no permitida (lectura de archivos / IO de red): "
+                    f"'{nombre}'."
+                )
 
     # 4. Garantizar un LIMIT a nivel superior.
     secured = _ensure_limit(cleaned, stmt, max_limit)
@@ -122,9 +168,15 @@ def validate_and_secure(sql: str, *, max_limit: int | None = None) -> str:
 
 
 def _has_top_level_limit(stmt: sqlparse.sql.Statement) -> bool:
-    """¿La sentencia tiene un LIMIT a nivel superior (no dentro de subconsultas)?"""
+    """¿La sentencia ya acota cuántas filas devuelve a nivel superior?
+
+    Detecta tanto `LIMIT` como `FETCH FIRST/NEXT n ROWS ONLY` (sintaxis SQL
+    estándar válida en Postgres). Si no se detectara el `FETCH`, se inyectaría un
+    `LIMIT` tras él y el SQL resultante sería inválido (M3). Se mira solo el nivel
+    superior, no dentro de subconsultas.
+    """
     for token in stmt.tokens:
-        if token.ttype is T.Keyword and token.normalized.upper() == "LIMIT":
+        if token.ttype is T.Keyword and token.normalized.upper() in ("LIMIT", "FETCH"):
             return True
     return False
 

@@ -1,6 +1,6 @@
 """Verificación de conexión de la Fase 0.
 
-Confirma que la app se conecta a Supabase con el rol de SOLO LECTURA y que
+Confirma que la app se conecta a Neon con el rol de SOLO LECTURA y que
 Northwind está cargado. Es la compuerta para pasar a la Fase 1.
 
 Uso:

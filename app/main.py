@@ -18,6 +18,7 @@ base de datos.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
@@ -81,7 +82,9 @@ def _verificar_secreto(request: Request) -> bool:
     if not settings.webhook_secret:
         return False
     recibido = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    return recibido == settings.webhook_secret
+    # Comparación en tiempo constante: evita filtrar el secreto byte a byte por
+    # un timing attack. `recibido or ""` cubre el caso de cabecera ausente.
+    return hmac.compare_digest(recibido or "", settings.webhook_secret)
 
 
 @app.post("/webhook")

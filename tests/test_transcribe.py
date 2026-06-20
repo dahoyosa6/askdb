@@ -60,10 +60,17 @@ def _fake_groq_factory(captura: dict, texto: str, *, lanzar: Exception | None = 
 
 @pytest.fixture(autouse=True)
 def _con_api_key(monkeypatch):
-    """Por defecto, los tests corren con una API key presente (salvo el que la quita)."""
+    """Por defecto, los tests corren con una API key presente (salvo el que la quita).
+
+    Además resetea el cliente Groq singleton (`tr._CLIENT`) antes y después de cada
+    test, para que cada uno instancie su propio doble de prueba (`tr.Groq`).
+    """
+    tr._CLIENT = None
     monkeypatch.setattr(
         tr, "settings", dataclasses.replace(settings, groq_api_key="gsk_test")
     )
+    yield
+    tr._CLIENT = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,3 +145,23 @@ def test_transcribe_error_claro_si_falta_api_key(monkeypatch):
         tr.transcribe(b"datos")
 
     assert captura == {}  # no se llamó a la API
+
+
+def test_cliente_groq_es_singleton(monkeypatch):
+    """B5: dos transcripciones reutilizan UN solo cliente Groq (no uno por llamada)."""
+    captura: dict = {}
+    instancias = {"n": 0}
+
+    base = _fake_groq_factory(captura, "ok")
+
+    class _ContandoGroq(base):
+        def __init__(self, *args, **kwargs):
+            instancias["n"] += 1
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(tr, "Groq", _ContandoGroq)
+
+    tr.transcribe(b"uno")
+    tr.transcribe(b"dos")
+
+    assert instancias["n"] == 1  # se construyó una sola vez

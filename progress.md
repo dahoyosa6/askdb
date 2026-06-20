@@ -3,8 +3,9 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 7 COMPLETA ✅ (voz) → siguiente: Fase 8 (despliegue Railway).
-- **% MVP:** ~90%. MVP funcional COMPLETO: el agente acepta texto y voz por Telegram, seguro y con memoria.
+- **Fase actual:** Fase 7 COMPLETA ✅ + **review completa de endurecimiento pre-F8 ✅** → siguiente: Fase 8 (despliegue Railway).
+- **% MVP:** ~92%. MVP funcional COMPLETO y endurecido: el agente acepta texto y voz por Telegram,
+  seguro y con memoria. Suite ahora en **162/162** tras los arreglos de la review.
 - **Próximo paso:** Fase 8 — desplegar en Railway: subir el servidor FastAPI, definir variables de
   entorno (token, keys, WEBHOOK_URL pública, WEBHOOK_SECRET), registrar el webhook y probar en vivo.
 
@@ -45,6 +46,7 @@
 - [x] Crear proyecto Neon `askdb` y pegar `NEON_ADMIN_URL` (hecho; DB cargada).
 - [x] Rotar la API key de Anthropic y pegar la REAL en `.env` (hecha; prueba en vivo OK).
 - [x] Crear el repo público en GitHub y subir (hecho: github.com/dahoyosa6/askdb, rama `main`).
+- [x] Borrar el `.env.rtf` con la key vieja (hecho en la review; no estaba en git, key ya rotada).
 - [ ] (Recordatorio higiene) Al editar `.env`, cambiar SOLO la línea necesaria; no reemplazar
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
 - [ ] (Para probar el bot en vivo, F7/F8) Crear el bot en **BotFather** → `TELEGRAM_BOT_TOKEN`;
@@ -66,6 +68,28 @@
   averiguar su `chat_id` (`ALLOWED_CHAT_IDS`), generar `WEBHOOK_SECRET` aleatorio, crear `GROQ_API_KEY`.
 - Antes de F8 conviene: code-review de seguridad (subagente) y, si se quiere, una prueba en vivo local
   con un túnel (ngrok) antes de Railway. `pytest` debe dar **128/128** antes de tocar nada.
+
+## Bitácora — Review completa + endurecimiento pre-F8
+### 2026-06-19
+- **Review por 4 subagentes** (informes en `docs/revisiones/`): code-architect (código+seguridad),
+  tester-expert (QA), auditor (proceso), quality-reviewer (entregables). Veredicto: sólido, seguridad
+  SQL real y probada (bypasses adversariales todos bloqueados), 0 críticos. David pidió arreglar TODO.
+- **Arreglado (delegado a code-architect + docs por el Head):**
+  - Seguridad: A1 `.env.rtf` borrado (no estaba en git; key ya rotada); M2 `hmac.compare_digest` en el
+    webhook; **denylist de funciones peligrosas** en `validate_sql.py` (pg_read_file, lo_import, dblink,
+    etc.) como 2ª barrera de app (antes solo las cortaba el rol DB).
+  - Robustez: A2/B2 `answer_question` captura errores de Anthropic (`APIError`) + `RuntimeError` como
+    recuperables, mensaje "saturado" para 429/timeout, loguea `_request_id`; CLI envuelto; M5 pool con
+    `check_connection` + `max_idle` (evita fallo del primer mensaje tras pausa de Neon); M1 None-guards
+    en los handlers; M3 validador detecta `FETCH FIRST`; B5 cliente Groq singleton.
+  - Copy (calidad): B1 respuesta de 1 dato ya NO dice "El count es 830" (solo el valor); I1 captions
+    humanos; I2 tabla multi-fila como registros legibles; mensajes más cálidos.
+  - Tests: **+34** (denylist, FETCH, async handlers con `pytest-asyncio`+AsyncMock, robustez). Total **162/162**.
+  - Docs (Head): `CLAUDE.md` estado F0–F7 ✅ (antes decía "F3 siguiente"); README estado real;
+    nota en PRD de que nació de un spec madre; M6 docstrings `information_schema`→`pg_catalog` y Supabase→Neon.
+  - Deploy (B3): `.python-version` (3.12) + `Procfile` para Railway.
+- **Diferido a F8:** B4 (visibilidad de fallo de `set_webhook` vía Sentry). **Nota de mantenimiento:**
+  164 warnings de `pytest-asyncio` en Python 3.14 (deprecación de event-loop-policy), inocuas.
 
 ## Bitácora Fase 7 (voz)
 ### 2026-06-19

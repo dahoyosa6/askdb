@@ -63,7 +63,9 @@ def test_un_dato_1x1_es_texto_puro(monkeypatch):
     out = enrutar_salida(_ok(["total"], [(830,)]))
 
     assert out.kind == "text"
-    assert "830" in out.text
+    # B1: solo el valor, SIN el nombre técnico de columna ("El total es ...").
+    assert out.text == "830."
+    assert "total" not in out.text
     assert out.file_path is None
     # Pureza: la rama texto no debe haber tocado los generadores de artefactos.
     assert spy_chart.llamado is False
@@ -84,7 +86,7 @@ def test_cero_filas_es_texto_vacio():
     """0 filas -> texto con mensaje de vacío."""
     out = enrutar_salida(_ok(["total"], []))
     assert out.kind == "text"
-    assert "No se encontraron resultados" in out.text
+    assert "No encontré datos" in out.text
     assert out.file_path is None
 
 

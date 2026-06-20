@@ -7,6 +7,12 @@
 - **Responsable (De cero a uno):** David (Head of Project: Claude)
 - **Estado:** Aprobado (spec madre)
 
+> **Origen del PRD (proceso):** este PRD se derivó de un **spec/contrato ya escrito por
+> David**, maduro y completo, que cubre los 12 temas mínimos de arranque del estudio. Por
+> eso NO se hizo la entrevista por rondas (AskUserQuestion) que pide el método general: el
+> alcance vino cerrado de entrada. Las decisiones posteriores sí se validaron una por una
+> con David y quedaron en el registro de cambios (§10).
+
 ---
 
 ## 1. Problema y objetivo

@@ -42,8 +42,10 @@ DB: **Neon Postgres** (free). Hosting: **Railway**. Repo: GitHub público.
   corta el `statement_timeout` (8s), no el validador.
 
 ## Estado por fases (resumen; detalle en progress.md)
-- F0 Setup ✅ · F1 Core CLI ✅ (vivo) · F2 Guardrails ✅ (58 tests) · **F3 Auto-corrección → siguiente**
-- F4 Formato · F5 Memoria · F6 Telegram · F7 Voz · F8 Railway → pendientes.
+- F0 Setup ✅ · F1 Core CLI ✅ (vivo) · F2 Guardrails ✅ · F3 Auto-corrección ✅ ·
+  F4 Formato ✅ · F5 Memoria ✅ · F6 Telegram (webhook) ✅ · F7 Voz ✅ (128 tests).
+- **F8 Railway (despliegue) → siguiente.** MVP funcional completo: texto y voz por
+  Telegram, seguro, con memoria y formato automático.
 
 ## Cómo correrlo (local)
 ```bash
