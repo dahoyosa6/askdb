@@ -15,6 +15,7 @@ Reglas de diseño:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import os
 import re
@@ -49,6 +50,20 @@ def _hash8(columns: list[str], rows: list[tuple]) -> str:
     """
     h = hashlib.sha1(repr(columns).encode() + repr(rows).encode())
     return h.hexdigest()[:8]
+
+
+def _naive(valor: object) -> object:
+    """Quita la zona horaria a un datetime tz-aware; lo demás queda intacto.
+
+    Postgres/Neon devuelve columnas `timestamptz` como datetimes con `tzinfo`
+    (p. ej. una serie "mes a mes"). matplotlib se confunde si mezcla fechas con y
+    sin zona horaria al ordenar/dibujar el eje X; por defensa se normaliza el eje
+    temporal a UTC sin tz (mismo instante, eje consistente). Solo afecta datetimes
+    con tz; números, texto, None y fechas sin hora quedan igual.
+    """
+    if isinstance(valor, datetime.datetime) and valor.tzinfo is not None:
+        return valor.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return valor
 
 
 def _indice_columna_numerica(columns: list[str], rows: list[tuple]) -> int:
@@ -98,7 +113,9 @@ def generar_grafica(
     nombre_y = columns[idx_y]
 
     # Filtrar pares donde el valor (y) es None: matplotlib no los grafica bien.
-    pares = [(row[idx_x], row[idx_y]) for row in rows if row[idx_y] is not None]
+    # El eje X se normaliza con `_naive` (fechas tz-aware de Postgres) para que el
+    # ordenamiento y el dibujo no fallen al mezclar zonas horarias.
+    pares = [(_naive(row[idx_x]), row[idx_y]) for row in rows if row[idx_y] is not None]
 
     if tipo == "linea":
         # Una serie temporal se lee en orden cronológico del eje X.

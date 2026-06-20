@@ -83,3 +83,22 @@ def test_nombre_cambia_con_datos_distintos(tmp_path):
         ["cat", "n"], [("A", 2)], tipo="barras", output_dir=str(tmp_path)
     )
     assert ruta1 != ruta2
+
+
+def test_linea_con_fechas_tz_aware_no_revienta(tmp_path):
+    """Serie temporal con fechas tz-aware (Postgres timestamptz) -> gráfica OK.
+
+    El eje X se normaliza con `_naive` antes de ordenar/dibujar; mezclar fechas con
+    y sin zona horaria rompería matplotlib.
+    """
+    utc = datetime.timezone.utc
+    rows = [
+        (datetime.datetime(1997, 3, 1, tzinfo=utc), 130),
+        (datetime.datetime(1997, 1, 1, tzinfo=utc), 100),
+        (datetime.datetime(1997, 2, 1, tzinfo=utc), 150),
+    ]
+    ruta = chart.generar_grafica(
+        ["mes", "facturacion"], rows, tipo="linea", output_dir=str(tmp_path)
+    )
+    assert os.path.exists(ruta)
+    assert os.path.getsize(ruta) > 0

@@ -80,6 +80,8 @@ class Settings:
     output_dir: str = field(default_factory=lambda: _get("OUTPUT_DIR", "outputs"))
     chart_max_rows: int = field(default_factory=lambda: _get_int("CHART_MAX_ROWS", 50))
     table_max_rows_text: int = field(default_factory=lambda: _get_int("TABLE_MAX_ROWS_TEXT", 20))
+    # Decimales con que se muestran montos (float/Decimal) en la salida de TEXTO.
+    text_decimals: int = field(default_factory=lambda: _get_int("TEXT_DECIMALS", 2))
     schema_cache_path: str = field(default_factory=lambda: _get("SCHEMA_CACHE_PATH", "db/schema_cache.json"))
     log_level: str = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
 

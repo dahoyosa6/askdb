@@ -85,6 +85,44 @@ def _clasificar_columna(celdas: list) -> str:
     return "texto"
 
 
+def _plan_grafica(columns: list[str], rows: list[tuple]) -> tuple[int, int] | None:
+    """Decide si un resultado es graficable y con qué par de columnas.
+
+    Regla de gráfica (router inteligente): se grafica cuando hay EXACTAMENTE UNA
+    columna numérica y AL MENOS UNA columna de eje (temporal o texto), aunque
+    existan columnas descriptivas extra (p. ej. `mes` + `nombre_mes` + `facturacion`).
+
+    Se elige UN solo eje: se PREFIERE el temporal; si no hay temporal, el primer
+    eje de texto. La gráfica usa solo ese par [eje, numérica]; las columnas extra
+    se ignoran al dibujar.
+
+    Casos que NO se grafican (devuelve None):
+    - 2 o más columnas numéricas -> no se puede elegir una sola serie.
+    - ninguna columna numérica.
+    - ninguna columna de eje usable (temporal o texto).
+
+    Returns:
+        (idx_eje, idx_numerica) si es graficable; None si no.
+    """
+    tipos = [_clasificar_columna([row[i] for row in rows]) for i in range(len(columns))]
+
+    idx_numericas = [i for i, t in enumerate(tipos) if t == "numerica"]
+    if len(idx_numericas) != 1:
+        return None  # ninguna o varias numéricas: no hay una sola serie clara.
+
+    idx_temporales = [i for i, t in enumerate(tipos) if t == "temporal"]
+    idx_textos = [i for i, t in enumerate(tipos) if t == "texto"]
+
+    if idx_temporales:
+        idx_eje = idx_temporales[0]  # se prefiere el eje temporal.
+    elif idx_textos:
+        idx_eje = idx_textos[0]  # si no hay temporal, el primer texto.
+    else:
+        return None  # numérica sin eje usable: no graficable.
+
+    return idx_eje, idx_numericas[0]
+
+
 def _tipo_de_grafica(tipo_col_eje: str) -> str:
     """Tipo de gráfica según el tipo de la columna del eje X.
 
@@ -94,10 +132,48 @@ def _tipo_de_grafica(tipo_col_eje: str) -> str:
     return "linea" if tipo_col_eje == "temporal" else "barras"
 
 
+def _formatear_numero_esco(valor: float | Decimal) -> str:
+    """Formatea un monto (float/Decimal) al estilo es-CO para una PYME.
+
+    Redondea a `settings.text_decimals` (=2) decimales y usa separador de miles
+    con PUNTO y decimales con COMA. Ej: 617085.1999999998 -> "617.085,20".
+
+    Por qué NO se antepone "$": el agente responde sobre datos arbitrarios y no
+    sabe si el número es dinero, un conteo o un ratio; anteponer moneda sería
+    adivinar. Solo se da cantidad + separadores.
+
+    Implementación: se formatea primero al estilo "en-US" (coma=miles, punto=
+    decimales) con `format(..., ",.2f")` y luego se intercambian los separadores
+    a es-CO mediante un marcador temporal (evita pisar el punto recién puesto).
+    """
+    en_us = format(valor, f",.{settings.text_decimals}f")  # p. ej. "617,085.20"
+    return en_us.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def _valor_legible(valor: object) -> str:
-    """Formatea un valor de celda para texto (None -> 'sin dato')."""
+    """Formatea un valor de celda para la salida en TEXTO.
+
+    Reglas de presentación (es-CO, PYME de habla hispana):
+    - None -> "sin dato".
+    - float / Decimal -> redondeo a 2 decimales + separadores es-CO (ver
+      `_formatear_numero_esco`). Resuelve el bug de decimales "infinitos".
+    - int -> SIN separador de miles. Un int es ambiguo entre cantidad, AÑO
+      (1997, no "1.997") e IDENTIFICADOR (pedido 10248, no "10.248"); como no se
+      puede distinguir por el valor, lo seguro es no aplicarle separador y así
+      NUNCA romper un año o un ID. (Un conteo grande se ve sin punto; es el
+      precio aceptable de no estropear años/IDs.)
+    - bool -> NO es cantidad (sí/no); aunque en Python es subclase de int, se
+      muestra tal cual y no se formatea como número.
+    - date/datetime/str y cualquier otro tipo -> sin cambios (str(valor)).
+    """
     if valor is None:
         return "sin dato"
+    # bool antes que int: bool es subclase de int y NO debe formatearse.
+    if isinstance(valor, bool):
+        return str(valor)
+    if isinstance(valor, (float, Decimal)):
+        return _formatear_numero_esco(valor)
+    # int (no bool): se deja entero, sin separador, para no romper años ni IDs.
     return str(valor)
 
 
@@ -147,12 +223,17 @@ def elegir_formato(columns: list[str], rows: list[tuple]) -> str:
     1. 0 filas -> "text".
     2. 1 fila -> "text" (decisión de producto: un registro único siempre es texto).
     3. más de `chart_max_rows` filas -> "excel" (detalle largo).
-    4. más de 2 columnas (con 2..chart_max_rows filas) -> "excel" (tabla ancha).
-    5. 1 columna con varias filas -> "text" si caben (<= table_max_rows_text),
+    4. GRÁFICA si hay EXACTAMENTE 1 columna numérica + AL MENOS 1 eje (temporal o
+       texto), AUNQUE existan columnas descriptivas extra. Se grafica solo el par
+       [eje elegido, numérica] (eje preferido: temporal; si no, primer texto).
+       Ver `_plan_grafica`. (Router inteligente: antes una columna descriptiva de
+       más tiraba todo a Excel y la gráfica casi nunca salía.)
+    5. tabla ancha NO graficable (> 2 columnas) -> "excel" (no se grafica y no
+       cabe legible en chat; p. ej. varias numéricas, o id+texto+varias numéricas).
+    6. 1 columna con varias filas -> "text" si caben (<= table_max_rows_text),
        si no "excel".
-    6. 2 columnas con 2..chart_max_rows filas -> "chart" si hay exactamente 1
-       columna numérica + 1 columna de eje (texto o temporal); si no, "text"
-       (si caben) o "excel".
+    7. Resto (2 columnas no graficables, p. ej. dos textos): "text" si cabe
+       (<= table_max_rows_text), si no "excel".
 
     Returns:
         "text" | "chart" | "excel".
@@ -172,24 +253,21 @@ def elegir_formato(columns: list[str], rows: list[tuple]) -> str:
     if n_filas > settings.chart_max_rows:
         return "excel"
 
-    # 4. Tabla ancha: más de 2 columnas no se grafica; va a Excel.
+    # 4. ¿Graficable? 1 numérica + >=1 eje (aunque haya columnas extra).
+    if _plan_grafica(columns, rows) is not None:
+        return "chart"
+
+    # 5. Tabla ancha NO graficable (> 2 columnas): Excel. Llega aquí cuando hay
+    #    varias numéricas o ningún eje usable; no se puede elegir una sola serie y
+    #    no cabe legible en el chat, así que se entrega el detalle en Excel.
     if n_cols > 2:
         return "excel"
 
-    # 5. Una sola columna con varias filas: texto si es corta, si no Excel.
+    # 6. Una sola columna con varias filas: texto si es corta, si no Excel.
     if n_cols == 1:
         return "text" if n_filas <= settings.table_max_rows_text else "excel"
 
-    # 6. Exactamente 2 columnas: candidata a gráfica si una es numérica (valor)
-    #    y la otra es eje (texto/categórica o temporal).
-    tipos = [_clasificar_columna([row[i] for row in rows]) for i in range(n_cols)]
-    numericas = [t for t in tipos if t == "numerica"]
-    ejes = [t for t in tipos if t in ("texto", "temporal")]
-
-    if len(numericas) == 1 and len(ejes) == 1:
-        return "chart"
-
-    # Dos columnas no graficables (p. ej. dos textos): texto si cabe, si no Excel.
+    # 7. Dos columnas no graficables (p. ej. dos textos): texto si cabe, si no Excel.
     return "text" if n_filas <= settings.table_max_rows_text else "excel"
 
 
@@ -231,11 +309,19 @@ def enrutar_salida(
     # Ramas con artefacto: gráfica o Excel. Cualquier fallo cae a TEXTO.
     if kind == "chart":
         try:
-            tipos = [_clasificar_columna([row[i] for row in rows]) for i in range(len(columns))]
-            # El eje es la columna no numérica (texto o temporal).
-            idx_eje = next(i for i, t in enumerate(tipos) if t in ("texto", "temporal"))
-            tipo = _tipo_de_grafica(tipos[idx_eje])
-            ruta = chart.generar_grafica(columns, rows, tipo=tipo)
+            plan = _plan_grafica(columns, rows)
+            # `elegir_formato` ya garantizó que es graficable; este guard es defensa.
+            if plan is None:
+                raise ValueError("resultado no graficable")
+            idx_eje, idx_num = plan
+            # PROYECCIÓN a 2 columnas: la gráfica recibe SOLO el par
+            # [eje elegido, numérica], ignorando columnas descriptivas extra
+            # (p. ej. `nombre_mes`). Antes se le pasaban todas las columnas.
+            cols_grafica = [columns[idx_eje], columns[idx_num]]
+            filas_grafica = [(fila[idx_eje], fila[idx_num]) for fila in rows]
+            tipo_eje = _clasificar_columna([fila[idx_eje] for fila in rows])
+            tipo = _tipo_de_grafica(tipo_eje)
+            ruta = chart.generar_grafica(cols_grafica, filas_grafica, tipo=tipo)
             return OutputResult(
                 kind="chart",
                 # I1: caption humano. No exponemos los nombres crudos de columna

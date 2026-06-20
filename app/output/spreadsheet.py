@@ -13,6 +13,7 @@ DataFrame. Un SELECT con joins puede traer columnas repetidas (p. ej. dos
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import os
 import re
@@ -20,6 +21,33 @@ import re
 import pandas as pd
 
 from config import settings
+
+
+def _naive(valor: object) -> object:
+    """Convierte un datetime con zona horaria a "naive" (sin tz). Lo demás intacto.
+
+    openpyxl NO admite escribir un datetime con `tzinfo` en un .xlsx y revienta con
+    "Excel does not support datetimes with timezones". Postgres/Neon devuelve
+    columnas `timestamptz` como datetimes tz-aware (p. ej. `1997-01-01 00:00:00+00:00`),
+    así que cualquier consulta sobre fechas con zona horaria tumbaba la generación de
+    Excel.
+
+    Estrategia: se normaliza a UTC y luego se quita la tz (`astimezone(UTC)` +
+    `replace(tzinfo=None)`). Se elige UTC (no la hora local) para que el instante
+    quede bien definido y reproducible sin importar la zona del servidor; el dato
+    de Northwind ya viene en UTC, así que el valor mostrado no cambia.
+
+    Solo toca datetimes con `tzinfo`. Números, texto, None, fechas sin hora
+    (`date`) y datetimes ya "naive" se devuelven sin cambios.
+    """
+    if isinstance(valor, datetime.datetime) and valor.tzinfo is not None:
+        return valor.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return valor
+
+
+def _filas_naive(rows: list[tuple]) -> list[tuple]:
+    """Aplica `_naive` a cada celda de cada fila (saneo previo a escribir Excel)."""
+    return [tuple(_naive(celda) for celda in fila) for fila in rows]
 
 
 def _slug(texto: str) -> str:
@@ -74,7 +102,9 @@ def generar_excel(
     os.makedirs(carpeta, exist_ok=True)
 
     columnas = _columnas_unicas(columns)
-    df = pd.DataFrame(rows, columns=columnas)
+    # Saneo: openpyxl no escribe datetimes con zona horaria (Postgres devuelve
+    # `timestamptz` tz-aware). Se normalizan a naive ANTES de armar el DataFrame.
+    df = pd.DataFrame(_filas_naive(rows), columns=columnas)
 
     prefijo = _slug(nombre_base) if nombre_base else "tabla"
     slug_cols = _slug("_".join(columns))

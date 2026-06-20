@@ -126,7 +126,45 @@ def test_system_prompt_cachea_ultimo_bloque():
     # Solo el último bloque lleva cache_control ephemeral.
     assert system[-1].get("cache_control") == {"type": "ephemeral"}
     assert "cache_control" not in system[0]
+    assert "cache_control" not in system[1]
     # El esquema y el glosario están presentes.
     joined = "\n".join(b["text"] for b in system)
     assert "orders" in joined
     assert "GLOSARIO" in joined
+
+
+def test_instrucciones_guian_columnas_justas_en_comparacion():
+    """La regla nueva (#7) debe pedir SOLO dimensión + la métrica pedida,
+    sin agregar métricas que el usuario no pidió. Esto guía al modelo a
+    devolver 2 columnas en preguntas de comparar/ver, para que el router las
+    grafique en vez de mandarlas a Excel."""
+    instructions = build_system_prompt(SCHEMA, GLOSSARY)[0]["text"]
+    low = instructions.lower()
+    # Existe la regla numerada nueva.
+    assert "7." in instructions
+    # Menciona comparar/ver una métrica por una dimensión.
+    assert "comparar" in low or "comparar o ver" in low
+    assert "dimensión" in low
+    assert "métrica" in low
+    # Pide devolver SOLO 2 columnas (dimensión + la única métrica).
+    assert "2 columnas" in low
+    # No agregar métricas que el usuario no pidió.
+    assert "no pidió" in low or "no pidio" in low
+    # Excepción explícita para varias métricas / detalle / reporte.
+    assert "excepción" in low or "excepcion" in low
+    # Series temporales: no duplicar el eje (fecha + nombre del mes).
+    assert "por mes" in low or "serie" in low or "temporal" in low
+
+
+def test_reglas_duras_de_seguridad_intactas():
+    """La regla nueva NO debe haber alterado las barreras de seguridad
+    existentes (solo SELECT/WITH, una sola sentencia, nombres exactos)."""
+    instructions = build_system_prompt(SCHEMA, GLOSSARY)[0]["text"]
+    low = instructions.lower()
+    assert "sentencias select o with" in low
+    assert "una sola sentencia" in low
+    assert "exactamente" in low
+    assert "nunca insert, update, delete" in low
+    # Las 6 reglas previas siguen presentes (y la nueva 7).
+    for n in range(1, 8):
+        assert f"{n}." in instructions
