@@ -141,3 +141,9 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   Se recuerda **pregunta + SQL ejecutado** (no las filas), acotado a `memory_window` (=6 mensajes
   = 3 pares). El historial viaja en `messages` (no en `system`), así no rompe el prompt-caching.
   Se guarda solo en turnos exitosos. (Decisiones de producto de David + técnicas, Fase 5.)
+- 2026-06-19 — **Bot de Telegram (F6) por WEBHOOK con FastAPI** (no polling; decisión de David).
+  Comandos `/start`, `/help`, `/reset`. El cerebro síncrono se corre en `asyncio.to_thread` para no
+  bloquear el bot. Seguridad: header secreto `X-Telegram-Bot-Api-Secret-Token` con **fallo cerrado**
+  (sin `webhook_secret` → 403) + allowlist por `chat_id` + rate limit por minuto. El bot NUNCA expone
+  el SQL ni errores internos (usa el router; excepciones → log servidor + mensaje saneado). Nuevo
+  setting `webhook_secret`. La prueba en vivo requiere URL pública (F8) o túnel. (Fase 6.)

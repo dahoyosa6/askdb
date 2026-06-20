@@ -3,11 +3,10 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 5 COMPLETA ✅ (memoria conversacional) → siguiente: Fase 6 (bot Telegram).
-- **% MVP:** ~65%. El cerebro entiende conversaciones (follow-ups) además de preguntas sueltas.
-- **Próximo paso:** Fase 6 — bot de Telegram (texto): allowlist de chat IDs, rate limit, y
-  cablear el `chat_id` real de cada chat a `answer_question` (la memoria ya está lista para recibirlo).
-  Decidir si exponer un comando `/reset` que llame a `memory.reset(chat_id)`.
+- **Fase actual:** Fase 6 COMPLETA ✅ (bot Telegram por webhook, texto) → siguiente: Fase 7 (voz).
+- **% MVP:** ~78%. El agente es usable por una persona real vía Telegram (texto), seguro y con memoria.
+- **Próximo paso:** Fase 7 — voz: notas de voz → transcripción (Groq Whisper) → mismo pipeline de texto.
+  Construir `app/transcription/transcribe.py` (interfaz intercambiable) y un handler de voz en el bot.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -18,7 +17,7 @@
 | F3 | Auto-corrección | ✅ Terminada | 63/63 (5 nuevos, mockeados) |
 | F4 | Router de formato (texto/gráfica/Excel) | ✅ Terminada | 88/88 (25 nuevos) |
 | F5 | Memoria conversacional | ✅ Terminada | 100/100 (12 nuevos) |
-| F6 | Bot Telegram (texto) | Pendiente | — |
+| F6 | Bot Telegram (texto, webhook) | ✅ Terminada | 118/118 (18 nuevos) |
 | F7 | Voz (Groq) | Pendiente | — |
 | F8 | Despliegue Railway | Pendiente | — |
 
@@ -48,24 +47,50 @@
 - [x] Crear el repo público en GitHub y subir (hecho: github.com/dahoyosa6/askdb, rama `main`).
 - [ ] (Recordatorio higiene) Al editar `.env`, cambiar SOLO la línea necesaria; no reemplazar
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
-- [ ] (Fase 8) Crear cuenta/keys de Telegram (BotFather) y Groq cuando lleguemos a esas fases.
+- [ ] (Para probar el bot en vivo, F7/F8) Crear el bot en **BotFather** → `TELEGRAM_BOT_TOKEN`;
+      averiguar tu `chat_id` y poblar `ALLOWED_CHAT_IDS`; definir un `WEBHOOK_SECRET` aleatorio.
+      La `WEBHOOK_URL` pública sale del despliegue (Railway, F8).
+- [ ] (Fase 7) Crear `GROQ_API_KEY` (groq.com, free tier) para la transcripción de voz.
 
-## Para la PRÓXIMA sesión (Fase 6 — bot de Telegram, texto)
-- **Objetivo:** la interfaz real. Bot de Telegram (python-telegram-bot v21) que recibe texto,
-  llama a `answer_question(question, chat_id=<id del chat>)` y responde según el `OutputResult`
-  del router (texto / envía PNG / envía documento Excel). Criterio F6 del PRD.
-- **Seguridad:** allowlist de chat IDs (`settings.allowed_chat_ids`) — solo responden los
-  autorizados; rate limit (`settings.rate_limit_per_min`, =10). NUNCA mostrar SQL al usuario.
-- **Memoria (ya lista):** pasar el `chat_id` real conecta la memoria de Fase 5 automáticamente.
-  Decidir si exponer comando `/reset` → `memory.reset(chat_id)` para "empezar de cero".
-- Construir `app/interfaces/telegram_bot.py` (hoy `app/interfaces/` está vacío) y, si hace falta,
-  `app/main.py` (FastAPI para webhook, o polling). Las keys de Telegram las crea David (BotFather).
-- Tests: mockear la API de Telegram; verificar allowlist (chat no autorizado se ignora), que el
-  pipeline se invoca con el chat_id correcto, y el ruteo de texto/imagen/documento.
+## Para la PRÓXIMA sesión (Fase 7 — voz)
+- **Objetivo:** que una nota de voz se transcriba y pase por el mismo pipeline de texto.
+  Criterio F6 del PRD (la parte de voz). "El mismo cerebro, otra entrada."
+- Construir `app/transcription/transcribe.py` con `transcribe(audio_bytes_o_ruta) -> str` como
+  **interfaz intercambiable** (Groq Whisper hoy; cambiar de proveedor no debe tocar el bot).
+  Usar `settings.groq_api_key` y `settings.groq_whisper_model` (ya en config). Cliente: `groq` SDK.
+- En `app/interfaces/telegram_bot.py`: añadir un handler de voz (`MessageHandler(filters.VOICE, ...)`)
+  que descargue el audio del mensaje, lo transcriba (en `asyncio.to_thread`, es I/O bloqueante) y
+  reuse `procesar_pregunta(texto_transcrito, chat_id)` + `decidir_envio`. Allowlist + rate limit igual.
+  Ampliar `allowed_updates` en `set_webhook` para incluir voz si hace falta.
+- Tests (mockear Groq y la descarga de Telegram): audio → texto → mismo flujo; error de transcripción
+  → mensaje saneado; sigue respetando allowlist/rate limit.
+- Pendiente David (para probar en vivo, F7/F8): `GROQ_API_KEY` (groq.com, free tier).
 - Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md`; `source venv/bin/activate`;
-  `pytest` debe dar **100/100** antes de tocar nada. Código clave: `app/agent/execute.py`
-  (`answer_question`), `app/output/router.py` (`OutputResult`), `app/agent/memory.py` (`reset`),
-  `config.py` (telegram_*, allowed_chat_ids, rate_limit_per_min).
+  `pytest` debe dar **118/118** antes de tocar nada. Código clave: `app/interfaces/telegram_bot.py`
+  (`procesar_pregunta`, `handle_text` como patrón), `config.py` (groq_*).
+
+## Bitácora Fase 6 (bot de Telegram por webhook, texto)
+### 2026-06-19
+- `app/interfaces/telegram_bot.py` (NUEVO): `build_application()` (registra `/start`, `/help`,
+  `/reset` + `MessageHandler(TEXT & ~COMMAND)`); handlers async finos; funciones puras síncronas
+  `is_allowed`, `decidir_envio` (+`EnvioPlan`), puente `procesar_pregunta` (answer_question +
+  enrutar_salida); `RateLimiter` (ventana móvil 60s por chat_id, `now` inyectable, RAM).
+- `app/main.py` (NUEVO): FastAPI con `lifespan` (initialize/start → `set_webhook` tolerante a
+  fallo → stop/shutdown + `close_pool`), `GET /` (health Railway) y `POST /webhook`.
+- `config.py` + `.env.example`: nuevo setting `webhook_secret`.
+  (delegado a code-architect reps 1–6; verificado por el Head.)
+- **Decisiones de producto (David):** webhook con FastAPI (no polling); comandos /start, /help, /reset.
+- **Decisiones técnicas:** el cerebro síncrono corre en `asyncio.to_thread` para no bloquear el bot;
+  seguridad del webhook por header `X-Telegram-Bot-Api-Secret-Token` con **fallo cerrado** (sin
+  secreto → 403) + allowlist por chat_id; rate limiter en RAM (limitación v1). NUNCA se envía SQL
+  (el bot usa el router, no toca `result.sql`); toda excepción → `logger.exception` (servidor) +
+  mensaje saneado. Tests sin `pytest-asyncio`: lógica en funciones puras + webhook con `TestClient`
+  y `Application` falsa (`AsyncMock`); `Settings` es frozen → en tests se usa `dataclasses.replace`.
+- **Suite total: 118/118 verdes** (100 previos + 18 nuevos). Cero cambios en `app/agent/*`,
+  `app/output/*` ni `cli.py`. No se ejecutó el bot en vivo (no hay token ni URL pública).
+- **Pendiente David (para vivo en F8):** crear el bot en BotFather (`TELEGRAM_BOT_TOKEN`), poblar
+  `ALLOWED_CHAT_IDS`, definir `WEBHOOK_URL` pública y un `WEBHOOK_SECRET` aleatorio. Sin esos, el
+  bot no recibe nada (es esperado; se cablea en el despliegue).
 
 ## Bitácora Fase 5 (memoria conversacional)
 ### 2026-06-19

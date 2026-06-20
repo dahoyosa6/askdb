@@ -68,6 +68,7 @@ class Settings:
     allowed_chat_ids: list[int] = field(default_factory=lambda: _get_chat_ids("ALLOWED_CHAT_IDS"))
     telegram_use_webhook: bool = field(default_factory=lambda: _get_bool("TELEGRAM_USE_WEBHOOK", False))
     webhook_url: str = field(default_factory=lambda: _get("WEBHOOK_URL", ""))
+    webhook_secret: str = field(default_factory=lambda: _get("WEBHOOK_SECRET", ""))
 
     # --- Groq (voz) ---
     groq_api_key: str = field(default_factory=lambda: _get("GROQ_API_KEY", ""))
