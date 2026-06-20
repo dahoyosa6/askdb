@@ -3,11 +3,15 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 7 COMPLETA ✅ + **review completa de endurecimiento pre-F8 ✅** → siguiente: Fase 8 (despliegue Railway).
-- **% MVP:** ~92%. MVP funcional COMPLETO y endurecido: el agente acepta texto y voz por Telegram,
-  seguro y con memoria. Suite ahora en **170/170** tras dos vueltas de review + verificación.
-- **Próximo paso:** Fase 8 — desplegar en Railway: subir el servidor FastAPI, definir variables de
-  entorno (token, keys, WEBHOOK_URL pública, WEBHOOK_SECRET), registrar el webhook y probar en vivo.
+- **Fase actual:** Fase 8 EN CURSO — **prueba en vivo local (ngrok) COMPLETA ✅**. Credenciales
+  reunidas (Fase A) y bot probado end-to-end desde Telegram real (Fase B). Falta: observabilidad
+  (Sentry + PostHog) y el despliegue en Railway.
+- **% MVP:** ~96%. El agente corre vivo en local: texto y voz por Telegram, seguro, con memoria,
+  números bien formateados, gráficas y Excel funcionando. Suite **211/211** (170 → 211, +41 tests
+  tras los arreglos de la prueba en vivo).
+- **Próximo paso:** Fase C (observabilidad: Sentry + PostHog) → Fase D (Railway: instalar CLI,
+  login de David, `railway init/up`, variables, dominio, cerrar el lazo del webhook contra la URL
+  de prod) → Fase E (docs + recordatorios de producción de Automatizaciones.md).
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -20,11 +24,32 @@
 | F5 | Memoria conversacional | ✅ Terminada | 100/100 (12 nuevos) |
 | F6 | Bot Telegram (texto, webhook) | ✅ Terminada | 118/118 (18 nuevos) |
 | F7 | Voz (Groq) | ✅ Terminada | 128/128 (10 nuevos) |
-| F8 | Despliegue Railway | Pendiente | — |
+| F8 | Despliegue Railway | En curso (prueba local ✅; falta deploy) | 211/211 |
 
 ## Bitácora
+### 2026-06-20 — Fase 8: prueba en vivo local (ngrok) + arreglos
+- **Fase A (credenciales):** bot creado en BotFather (@AskDataBaseBot). Guiado a David para sacar el
+  `chat_id` (vía `getUpdates` con `deleteWebhook` previo) = `1381262694`; `WEBHOOK_SECRET` generado
+  con `secrets.token_urlsafe(32)`; `GROQ_API_KEY` creada. `.env` completo (editado línea por línea).
+- **Fase B (prueba en vivo con ngrok):** túnel ngrok + `uvicorn` local; el `lifespan` registró el
+  webhook automáticamente. Seguridad del webhook verificada por curl (sin/secreto malo → 403; correcto
+  → 200; `GET /` → 200). David recorrió la checklist desde su Telegram real.
+- **3 hallazgos al probar en vivo, arreglados con TDD (delegados a code-architect):**
+  1. Números con decimales infinitos en texto → formato es-CO 2 decimales (router._valor_legible);
+     int sin separador para no romper años/IDs. Setting `text_decimals`.
+  2. Bug: Excel reventaba con datetimes tz-aware (openpyxl) → cae a texto. Fix: normalizar a UTC naive
+     en spreadsheet.py y chart.py.
+  3. Las gráficas casi nunca salían: el router exigía exactamente 2 columnas y Claude devolvía columnas
+     extra. Decisión de David: **router más inteligente** (grafica con 1 numérica + ≥1 eje, prefiere
+     temporal, proyecta al par eje+métrica) **+ guía al modelo** (regla #7 "columnas justas":
+     devolver solo dimensión + la métrica pedida en preguntas de comparar/ver; excepción si pide varias
+     métricas/reporte → Excel).
+- Verificado en vivo tras cada arreglo (reinicios de uvicorn): números formateados, gráfica de línea
+  (mes a mes), gráfica de barras (ingresos por categoría con lenguaje natural) y Excel OK.
+- Suite **211/211** verde. **Commit `6850f35`**. Apagado el servidor/túnel local al cerrar (la URL de
+  ngrok es temporal). **Próximo:** Fase C (Sentry+PostHog) y Fase D (Railway).
+
 ### 2026-06-19
-- Entrevista cerrada: todo desde cero, hosting Railway, GitHub público, transcripción Groq.
 - **Seguridad:** se encontró un `.env.rtf` con la API key de Anthropic en texto plano →
   eliminado; `.env` recreado con placeholders; `.gitignore` protege secretos desde el commit 0.
   **Pendiente David:** rotar esa key en console.anthropic.com (comprometida).
@@ -49,10 +74,12 @@
 - [x] Borrar el `.env.rtf` con la key vieja (hecho en la review; no estaba en git, key ya rotada).
 - [ ] (Recordatorio higiene) Al editar `.env`, cambiar SOLO la línea necesaria; no reemplazar
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
-- [ ] (Para probar el bot en vivo, F7/F8) Crear el bot en **BotFather** → `TELEGRAM_BOT_TOKEN`;
-      averiguar tu `chat_id` y poblar `ALLOWED_CHAT_IDS`; definir un `WEBHOOK_SECRET` aleatorio.
-      La `WEBHOOK_URL` pública sale del despliegue (Railway, F8).
-- [ ] (Fase 7) Crear `GROQ_API_KEY` (groq.com, free tier) para la transcripción de voz.
+- [x] (Para probar el bot en vivo) Bot creado en **BotFather** (@AskDataBaseBot), `TELEGRAM_BOT_TOKEN`
+      en `.env`; `chat_id` de David = `1381262694` en `ALLOWED_CHAT_IDS`; `WEBHOOK_SECRET` aleatorio
+      generado y en `.env`. (Hecho en la prueba en vivo, 2026-06-20.)
+- [x] Crear `GROQ_API_KEY` (groq.com, free tier) — hecha y en `.env`; voz probada en vivo.
+- [ ] (Pendiente para Railway, F8) La `WEBHOOK_URL` pública definitiva sale del dominio de Railway;
+      en local se usó la URL temporal de ngrok.
 
 ## Para la PRÓXIMA sesión (Fase 8 — despliegue en Railway)
 - **Objetivo:** poner el bot en producción. Desplegar el servidor FastAPI (`app/main.py`) en Railway,
@@ -252,4 +279,6 @@
 - Repo local: `/Users/davidhoyos/Clientes/AskDB`
 - GitHub: https://github.com/dahoyosa6/askdb (público)
 - Neon: proyecto `AskDB` (org dahoyosa6) — base `neondb`, rol runtime `askdb_readonly`
+- Bot de Telegram: **@AskDataBaseBot** (chat autorizado de David: `1381262694`)
+- ngrok: URL temporal (cambia cada sesión; en la última fue `zestfully-prong-astride.ngrok-free.dev`)
 - Railway: (pendiente, Fase 8)

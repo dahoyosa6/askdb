@@ -158,3 +158,17 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   `procesar_pregunta`/`decidir_envio` sin duplicar lógica. Decisión de producto de David: el bot
   **muestra lo que entendió** ("🎤 Entendí: ...") antes de responder. Límite de duración configurable
   (`max_voice_duration_s`, def. 120). Solo notas de voz (no audios). (Fase 7.)
+- 2026-06-20 — **Formato de números en texto (es-CO).** Los `float`/`Decimal` se muestran con 2
+  decimales y separador de miles colombiano (miles '.', decimales ','); los `int` van sin separador
+  para no corromper años (1997 ≠ "1.997") ni IDs. Setting `text_decimals` (=2). Surgió de la prueba
+  en vivo: la facturación salía como "617085.1999999998". (Fase 8, prueba en vivo.)
+- 2026-06-20 — **Heurística de formato (F4) ampliada: la gráfica ya NO exige exactamente 2 columnas.**
+  Ahora se grafica cuando hay **1 columna numérica + ≥1 columna de eje** (texto/temporal), aunque
+  haya columnas descriptivas extra; se proyecta al par [eje, métrica] (eje temporal preferido →
+  línea; si no, barras). Con **2+ columnas numéricas** sigue yendo a Excel (no se puede una sola
+  serie). Revisa/expande la regla del 2026-06-19. (Decisión de David, prueba en vivo Fase 8.)
+- 2026-06-20 — **Guía al modelo (generate_sql, regla #7 "columnas justas").** En preguntas de
+  comparar/ver UNA métrica por una dimensión, Claude devuelve solo 2 columnas (dimensión + métrica
+  pedida), sin inflar con métricas no solicitadas, para que el router las grafique. Excepción: si el
+  usuario pide varias métricas o un "reporte/detalle", devuelve todas (van a Excel). Complementa al
+  router inteligente para que las gráficas salgan con lenguaje natural. (Decisión de David, Fase 8.)
