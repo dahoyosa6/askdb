@@ -62,6 +62,8 @@ class Settings:
     max_sql_retries: int = field(default_factory=lambda: _get_int("MAX_SQL_RETRIES", 3))
     memory_window: int = field(default_factory=lambda: _get_int("MEMORY_WINDOW", 6))
     rate_limit_per_min: int = field(default_factory=lambda: _get_int("RATE_LIMIT_PER_MIN", 10))
+    # Duración máxima de una nota de voz (segundos). Más larga se rechaza (Fase 7).
+    max_voice_duration_s: int = field(default_factory=lambda: _get_int("MAX_VOICE_DURATION_S", 120))
 
     # --- Telegram ---
     telegram_bot_token: str = field(default_factory=lambda: _get("TELEGRAM_BOT_TOKEN", ""))

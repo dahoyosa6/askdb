@@ -48,6 +48,7 @@ from config import settings
 from app.agent import memory
 from app.agent.execute import answer_question
 from app.output.router import OutputResult, enrutar_salida
+from app.transcription.transcribe import transcribe
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,36 @@ _MENSAJE_GENERICO = (
 _TEXTO_NO_AUTORIZADO = "No estás autorizado para usar este bot."
 _TEXTO_RATE_LIMIT = "Vas muy rápido, intenta de nuevo en un momento."
 _TEXTO_RESET = "Listo, olvidé el contexto de esta conversación."
+
+# --- Textos de la voz (Fase 7) ---
+_TEXTO_VOZ_MUY_LARGA = (
+    f"La nota de voz es muy larga. Envíala de menos de "
+    f"{settings.max_voice_duration_s} segundos o escríbeme."
+)
+_TEXTO_VOZ_NO_ENTENDIDA = (
+    "No pude entender el audio, intenta de nuevo o escríbeme."
+)
+
+
+def texto_eco(transcrito: str) -> str:
+    """Eco de lo que el bot entendió de la nota de voz (decisión de David).
+
+    Antes de responder, el bot le muestra a la persona qué entendió, para que
+    pueda corregir si la transcripción salió mal.
+    """
+    return f'🎤 Entendí: "{transcrito}"'
+
+
+def voz_demasiado_larga(duracion_s: int | None, maximo_s: int) -> bool:
+    """¿La nota de voz excede el máximo permitido?
+
+    Función pura. `duracion_s` None (Telegram no la informó) -> False: no
+    bloqueamos por falta de dato; el `statement_timeout` y los límites de la API
+    son la red de seguridad real.
+    """
+    if duracion_s is None:
+        return False
+    return duracion_s > maximo_s
 
 _TEXTO_START = (
     "¡Hola! Soy AskDB, tu asistente para consultar tus datos.\n\n"
@@ -237,6 +268,70 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await context.bot.send_message(chat_id, _MENSAJE_GENERICO)
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler de notas de voz: transcribe y reusa el MISMO pipeline de texto.
+
+    Replica el patrón de `handle_text` (allowlist -> rate limit -> trabajo en un
+    hilo aparte -> envío según plan), añadiendo dos pasos propios de la voz:
+    descargar el audio y transcribirlo (Groq, en `asyncio.to_thread` porque es
+    I/O bloqueante). Tras transcribir, ECOA lo que entendió (decisión de David)
+    y sigue exactamente como el texto.
+
+    Reglas duras: el SQL crudo y los errores internos NUNCA llegan al usuario; los
+    stacktraces se loguean SOLO del lado servidor y al usuario le llega un mensaje
+    saneado.
+    """
+    chat_id = update.effective_chat.id
+
+    # 1. Allowlist: solo responden los chats autorizados.
+    if not is_allowed(chat_id, settings.allowed_chat_ids):
+        logger.warning("Nota de voz de chat NO autorizado: %s", chat_id)
+        await context.bot.send_message(chat_id, _TEXTO_NO_AUTORIZADO)
+        return
+
+    # 2. Rate limit: frena el abuso por chat.
+    if not _rate_limiter.allow(chat_id):
+        await context.bot.send_message(chat_id, _TEXTO_RATE_LIMIT)
+        return
+
+    # 3. Duración: rechazamos notas demasiado largas (costo y abuso).
+    voice = update.message.voice
+    if voz_demasiado_larga(voice.duration, settings.max_voice_duration_s):
+        await context.bot.send_message(chat_id, _TEXTO_VOZ_MUY_LARGA)
+        return
+
+    try:
+        # Descargar el audio desde Telegram (I/O async).
+        file = await context.bot.get_file(voice.file_id)
+        audio = await file.download_as_bytearray()
+
+        # Transcribir es síncrono y bloqueante (sube a Groq): a un hilo aparte.
+        texto = await asyncio.to_thread(transcribe, bytes(audio))
+        if not texto.strip():
+            await context.bot.send_message(chat_id, _TEXTO_VOZ_NO_ENTENDIDA)
+            return
+
+        # Eco de lo entendido (decisión de David): que la persona pueda corregir.
+        await context.bot.send_message(chat_id, texto_eco(texto))
+
+        # A partir de aquí, EXACTAMENTE el mismo flujo que el texto.
+        salida = await asyncio.to_thread(procesar_pregunta, texto, chat_id)
+        plan = decidir_envio(salida)
+
+        if plan.metodo == "photo":
+            with open(plan.file_path, "rb") as f:
+                await context.bot.send_photo(chat_id, f, caption=plan.caption)
+        elif plan.metodo == "document":
+            with open(plan.file_path, "rb") as f:
+                await context.bot.send_document(chat_id, f, caption=plan.caption)
+        else:  # "message"
+            await context.bot.send_message(chat_id, plan.text)
+    except Exception:  # noqa: BLE001 - frontera: saneamos todo error al usuario
+        # Regla dura: stacktrace SOLO en el servidor; al usuario, mensaje genérico.
+        logger.exception("handle_voice: error procesando la nota de voz de chat %s", chat_id)
+        await context.bot.send_message(chat_id, _MENSAJE_GENERICO)
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/start: bienvenida y explicación de cómo usar el bot."""
     chat_id = update.effective_chat.id
@@ -287,5 +382,7 @@ def build_application() -> Application:
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
+    # Solo notas de voz (filters.VOICE), no audios/música (filters.AUDIO).
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
     return application

@@ -23,6 +23,8 @@ from app.interfaces.telegram_bot import (
     decidir_envio,
     is_allowed,
     procesar_pregunta,
+    texto_eco,
+    voz_demasiado_larga,
 )
 from app.output.router import OutputResult
 
@@ -164,3 +166,37 @@ def test_procesar_pregunta_pasa_chat_id_y_devuelve_output(monkeypatch):
     # El SQL crudo NUNCA viaja en lo que se le entrega al usuario.
     assert "SELECT" not in (salida.text or "")
     assert "SELECT" not in (salida.caption or "")
+
+
+# ---------------------------------------------------------------------------
+# voz_demasiado_larga (Fase 7, helper puro)
+# ---------------------------------------------------------------------------
+
+
+def test_voz_demasiado_larga_excede():
+    assert voz_demasiado_larga(130, 120) is True
+
+
+def test_voz_demasiado_larga_no_excede():
+    """Igual al máximo o por debajo no bloquea."""
+    assert voz_demasiado_larga(120, 120) is False
+    assert voz_demasiado_larga(10, 120) is False
+
+
+def test_voz_demasiado_larga_none_no_bloquea():
+    """Sin dato de duración (None) no se bloquea."""
+    assert voz_demasiado_larga(None, 120) is False
+
+
+# ---------------------------------------------------------------------------
+# texto_eco (Fase 7, helper puro)
+# ---------------------------------------------------------------------------
+
+
+def test_texto_eco_formato_correcto():
+    assert texto_eco("cuántos pedidos hay") == '🎤 Entendí: "cuántos pedidos hay"'
+
+
+def test_texto_eco_incluye_el_texto():
+    eco = texto_eco("ventas del mes")
+    assert "ventas del mes" in eco

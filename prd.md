@@ -147,3 +147,8 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   (sin `webhook_secret` → 403) + allowlist por `chat_id` + rate limit por minuto. El bot NUNCA expone
   el SQL ni errores internos (usa el router; excepciones → log servidor + mensaje saneado). Nuevo
   setting `webhook_secret`. La prueba en vivo requiere URL pública (F8) o túnel. (Fase 6.)
+- 2026-06-19 — **Voz (F7): nota de voz → transcripción → mismo pipeline.** `transcribe()` es una
+  **interfaz intercambiable** (Groq Whisper hoy, `language="es"`); el handler de voz reusa
+  `procesar_pregunta`/`decidir_envio` sin duplicar lógica. Decisión de producto de David: el bot
+  **muestra lo que entendió** ("🎤 Entendí: ...") antes de responder. Límite de duración configurable
+  (`max_voice_duration_s`, def. 120). Solo notas de voz (no audios). (Fase 7.)

@@ -3,10 +3,10 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 6 COMPLETA ✅ (bot Telegram por webhook, texto) → siguiente: Fase 7 (voz).
-- **% MVP:** ~78%. El agente es usable por una persona real vía Telegram (texto), seguro y con memoria.
-- **Próximo paso:** Fase 7 — voz: notas de voz → transcripción (Groq Whisper) → mismo pipeline de texto.
-  Construir `app/transcription/transcribe.py` (interfaz intercambiable) y un handler de voz en el bot.
+- **Fase actual:** Fase 7 COMPLETA ✅ (voz) → siguiente: Fase 8 (despliegue Railway).
+- **% MVP:** ~90%. MVP funcional COMPLETO: el agente acepta texto y voz por Telegram, seguro y con memoria.
+- **Próximo paso:** Fase 8 — desplegar en Railway: subir el servidor FastAPI, definir variables de
+  entorno (token, keys, WEBHOOK_URL pública, WEBHOOK_SECRET), registrar el webhook y probar en vivo.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -18,7 +18,7 @@
 | F4 | Router de formato (texto/gráfica/Excel) | ✅ Terminada | 88/88 (25 nuevos) |
 | F5 | Memoria conversacional | ✅ Terminada | 100/100 (12 nuevos) |
 | F6 | Bot Telegram (texto, webhook) | ✅ Terminada | 118/118 (18 nuevos) |
-| F7 | Voz (Groq) | Pendiente | — |
+| F7 | Voz (Groq) | ✅ Terminada | 128/128 (10 nuevos) |
 | F8 | Despliegue Railway | Pendiente | — |
 
 ## Bitácora
@@ -52,22 +52,39 @@
       La `WEBHOOK_URL` pública sale del despliegue (Railway, F8).
 - [ ] (Fase 7) Crear `GROQ_API_KEY` (groq.com, free tier) para la transcripción de voz.
 
-## Para la PRÓXIMA sesión (Fase 7 — voz)
-- **Objetivo:** que una nota de voz se transcriba y pase por el mismo pipeline de texto.
-  Criterio F6 del PRD (la parte de voz). "El mismo cerebro, otra entrada."
-- Construir `app/transcription/transcribe.py` con `transcribe(audio_bytes_o_ruta) -> str` como
-  **interfaz intercambiable** (Groq Whisper hoy; cambiar de proveedor no debe tocar el bot).
-  Usar `settings.groq_api_key` y `settings.groq_whisper_model` (ya en config). Cliente: `groq` SDK.
-- En `app/interfaces/telegram_bot.py`: añadir un handler de voz (`MessageHandler(filters.VOICE, ...)`)
-  que descargue el audio del mensaje, lo transcriba (en `asyncio.to_thread`, es I/O bloqueante) y
-  reuse `procesar_pregunta(texto_transcrito, chat_id)` + `decidir_envio`. Allowlist + rate limit igual.
-  Ampliar `allowed_updates` en `set_webhook` para incluir voz si hace falta.
-- Tests (mockear Groq y la descarga de Telegram): audio → texto → mismo flujo; error de transcripción
-  → mensaje saneado; sigue respetando allowlist/rate limit.
-- Pendiente David (para probar en vivo, F7/F8): `GROQ_API_KEY` (groq.com, free tier).
-- Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md`; `source venv/bin/activate`;
-  `pytest` debe dar **118/118** antes de tocar nada. Código clave: `app/interfaces/telegram_bot.py`
-  (`procesar_pregunta`, `handle_text` como patrón), `config.py` (groq_*).
+## Para la PRÓXIMA sesión (Fase 8 — despliegue en Railway)
+- **Objetivo:** poner el bot en producción. Desplegar el servidor FastAPI (`app/main.py`) en Railway,
+  configurar variables de entorno, registrar el webhook contra Telegram y probar EN VIVO (texto y voz).
+- Pasos previstos: (1) crear servicio en Railway apuntando al repo; (2) comando de arranque
+  `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (revisar/crear `Procfile` o config de Railway);
+  (3) cargar variables: `ANTHROPIC_API_KEY`, `DATABASE_URL` (Neon), `TELEGRAM_BOT_TOKEN`,
+  `ALLOWED_CHAT_IDS`, `WEBHOOK_SECRET`, `GROQ_API_KEY`, y `WEBHOOK_URL` = la URL pública que da Railway;
+  (4) al arrancar, el lifespan registra el webhook solo (ya está cableado); (5) probar texto y voz.
+- **MCPs útiles:** Vercel no aplica (es Railway); Sentry para errores en prod (opcional). Revisar si
+  hace falta `Procfile`/`railway.json` y un `runtime`/versión de Python (el venv usa 3.14).
+- Pendientes David (sin esto NO funciona en vivo): crear bot en BotFather (`TELEGRAM_BOT_TOKEN`),
+  averiguar su `chat_id` (`ALLOWED_CHAT_IDS`), generar `WEBHOOK_SECRET` aleatorio, crear `GROQ_API_KEY`.
+- Antes de F8 conviene: code-review de seguridad (subagente) y, si se quiere, una prueba en vivo local
+  con un túnel (ngrok) antes de Railway. `pytest` debe dar **128/128** antes de tocar nada.
+
+## Bitácora Fase 7 (voz)
+### 2026-06-19
+- `app/transcription/transcribe.py` (NUEVO): `transcribe(audio_bytes, *, filename="audio.ogg") -> str`
+  síncrono, Groq Whisper (`language="es"`), `.text.strip()`. **Interfaz intercambiable** (cambiar de
+  proveedor no toca el bot). Error claro si falta `GROQ_API_KEY`; los errores de API se propagan.
+- `app/interfaces/telegram_bot.py`: `handle_voice` (replica el patrón de `handle_text`: allowlist →
+  rate limit → límite de duración → `get_file`/`download_as_bytearray` → `to_thread(transcribe)` →
+  eco "🎤 Entendí: ..." → `procesar_pregunta` → `decidir_envio` → enviar; try/except saneado).
+  Helpers puros `texto_eco` y `voz_demasiado_larga`; constantes `_TEXTO_VOZ_MUY_LARGA`/
+  `_TEXTO_VOZ_NO_ENTENDIDA`. Registrado `MessageHandler(filters.VOICE, handle_voice)`.
+- `config.py` + `.env.example`: nuevo setting `max_voice_duration_s` (default 120).
+  (delegado a code-architect reps 1–3; verificado por el Head.)
+- **Decisión de producto (David):** el bot muestra lo que entendió (eco) antes de responder.
+- **Decisiones técnicas:** SDK Groq síncrono → corre en `asyncio.to_thread`; solo `filters.VOICE`
+  (no audios/música); `allowed_updates` sigue `["message"]` (la voz va dentro de message). Nunca se
+  expone SQL ni error (log servidor + mensaje saneado). Tests síncronos (Groq mockeado + helpers puros).
+- **Suite total: 128/128 verdes** (118 previos + 10 nuevos). Cero cambios en `app/agent/*`,
+  `app/output/*`, `app/main.py` ni `cli.py`. No se ejecutó Groq ni el bot en vivo.
 
 ## Bitácora Fase 6 (bot de Telegram por webhook, texto)
 ### 2026-06-19
