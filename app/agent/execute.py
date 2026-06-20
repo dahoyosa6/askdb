@@ -35,6 +35,7 @@ from config import settings
 # tests pueden monkeypatchear `app.agent.execute.generate_sql`,
 # `app.agent.execute.validate_and_secure` y `app.agent.execute.run_query` para
 # probar la orquestación sin tocar la red ni la base de datos real.
+from app.agent import memory
 from app.agent.generate_sql import generate_sql, get_client
 from app.agent.glossary import get_glossary
 from app.agent.schema import get_schema
@@ -192,17 +193,21 @@ def answer_question(
 
     Args:
         question: pregunta del usuario en lenguaje natural.
-        chat_id: reservado para Fase 5 (memoria conversacional). HOY NO SE USA;
-            no se activa memoria en esta fase.
+        chat_id: identifica la conversación. Si se pasa, se activa la memoria
+            conversacional corta (Fase 5): el historial del chat se inyecta al
+            modelo en cada intento y, si la consulta tiene éxito, el turno
+            (pregunta + SQL ejecutado) se guarda en memoria. Si es None, no se
+            usa ni se actualiza memoria.
         client: cliente Anthropic ya creado (útil en tests para inyectarlo). Si
             es None, se crea con `get_client()`.
 
     Returns:
         AnswerResult con el resultado o el mensaje de fallo saneado.
     """
-    # chat_id queda reservado para la memoria conversacional de la Fase 5; en la
-    # Fase 3 no se usa todavía (lo aceptamos para no cambiar la firma después).
-    _ = chat_id
+    # Memoria conversacional (Fase 5): si hay chat_id, recuperamos el historial
+    # del turno previo para inyectarlo al modelo. Es el MISMO en cada reintento
+    # del turno actual (el error_feedback, en cambio, es propio de cada intento).
+    history = memory.get_history(chat_id) if chat_id is not None else None
 
     schema = get_schema()
     glossary = get_glossary()
@@ -220,6 +225,7 @@ def answer_question(
                 question,
                 schema,
                 glossary,
+                history=history,
                 error_feedback=error_feedback,
             )
             # 2. Guardrails de seguridad (solo SELECT, una sentencia, LIMIT).
@@ -243,6 +249,11 @@ def answer_question(
         logger.info(
             "answer_question: éxito en el intento %d/%d.", intento, max_intentos
         )
+        # Memoria (Fase 5): guardamos el turno SOLO en éxito, con el SQL ya
+        # securizado (el que de verdad se ejecutó), no el crudo del modelo. En el
+        # camino de fallo (ok=False) NO se guarda nada.
+        if chat_id is not None:
+            memory.append_turn(chat_id, question, safe_sql)
         return AnswerResult(
             ok=True,
             columns=columns,

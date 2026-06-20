@@ -48,9 +48,11 @@ class _GenerateSpy:
     def __init__(self, sqls: list[str]) -> None:
         self._sqls = sqls
         self.feedbacks: list[str | None] = []
+        self.histories: list = []
         self.calls = 0
 
-    def __call__(self, client, question, schema, glossary, *, error_feedback=None):
+    def __call__(self, client, question, schema, glossary, history=None, *, error_feedback=None):
+        self.histories.append(history)
         self.feedbacks.append(error_feedback)
         sql = self._sqls[self.calls]
         self.calls += 1
@@ -186,3 +188,163 @@ def test_no_crea_cliente_real_si_se_inyecta(monkeypatch):
 
     result = answer_question("hola", client=SENTINEL_CLIENT)
     assert result.ok is True
+
+
+# ---------------------------------------------------------------------------
+# Integración de la memoria conversacional (Fase 5).
+# ---------------------------------------------------------------------------
+
+from app.agent import memory  # noqa: E402  (import local a la sección de memoria)
+
+
+@pytest.fixture
+def _memoria_limpia():
+    """Resetea el store de memoria antes y después de cada test que lo use."""
+    memory.clear_all()
+    yield
+    memory.clear_all()
+
+
+def test_segundo_turno_recibe_history_del_primero(monkeypatch, _memoria_limpia):
+    """El 2º turno (mismo chat_id) recibe el history del 1º; el 1º recibe None."""
+    spy = _GenerateSpy(
+        [
+            "SELECT count(*) AS total FROM orders",  # turno 1
+            "SELECT count(*) AS total FROM customers",  # turno 2
+        ]
+    )
+    monkeypatch.setattr(execute, "generate_sql", spy)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    answer_question("¿cuántos pedidos?", chat_id=42, client=SENTINEL_CLIENT)
+    answer_question("¿y clientes?", chat_id=42, client=SENTINEL_CLIENT)
+
+    # El 1er turno no tenía historial previo: get_history devuelve [] (vacío),
+    # que generate_sql trata igual que None (su `if history:` es falsy).
+    assert spy.histories[0] == []
+    # El 2º turno recibe el turno previo: pregunta + SQL securizado del 1º.
+    assert spy.histories[1] == [
+        {"role": "user", "content": "¿cuántos pedidos?"},
+        {"role": "assistant", "content": "SELECT count(*) AS total FROM orders"},
+    ]
+
+
+def test_sin_chat_id_history_es_none(monkeypatch, _memoria_limpia):
+    """Sin chat_id no se activa memoria: el history pasado es None."""
+    spy = _GenerateSpy(["SELECT count(*) AS total FROM orders"])
+    monkeypatch.setattr(execute, "generate_sql", spy)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    answer_question("¿cuántos pedidos?", client=SENTINEL_CLIENT)
+
+    assert spy.histories == [None]
+
+
+def test_exito_hace_append_a_memoria(monkeypatch, _memoria_limpia):
+    """Tras un turno exitoso, la memoria del chat tiene la pregunta y el SQL."""
+    spy = _GenerateSpy(["SELECT count(*) AS total FROM orders"])
+    monkeypatch.setattr(execute, "generate_sql", spy)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    answer_question("¿cuántos pedidos?", chat_id=7, client=SENTINEL_CLIENT)
+
+    # Usa el store real (reseteado por la fixture).
+    assert memory.get_history(7) == [
+        {"role": "user", "content": "¿cuántos pedidos?"},
+        {"role": "assistant", "content": "SELECT count(*) AS total FROM orders"},
+    ]
+
+
+def test_fallo_no_hace_append_a_memoria(monkeypatch, _memoria_limpia):
+    """Si se agotan los reintentos (ok=False), NO se guarda nada en memoria."""
+    n = settings.max_sql_retries
+    spy = _GenerateSpy(["SELECT * FROM orders WHERE x = 1"] * n)
+    monkeypatch.setattr(execute, "generate_sql", spy)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+
+    def always_fail(sql):
+        raise psycopg.errors.UndefinedColumn('column "x" does not exist')
+
+    monkeypatch.setattr(execute, "run_query", always_fail)
+
+    result = answer_question("pregunta imposible", chat_id=8, client=SENTINEL_CLIENT)
+
+    assert result.ok is False
+    assert memory.get_history(8) == []
+
+
+def test_aislamiento_entre_chats(monkeypatch, _memoria_limpia):
+    """El history de un turno de chat 2 no contiene la pregunta de chat 1."""
+    spy = _GenerateSpy(
+        [
+            "SELECT 1",  # chat 1
+            "SELECT 2",  # chat 2
+        ]
+    )
+    monkeypatch.setattr(execute, "generate_sql", spy)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+
+    answer_question("pregunta de chat 1", chat_id=1, client=SENTINEL_CLIENT)
+    answer_question("pregunta de chat 2", chat_id=2, client=SENTINEL_CLIENT)
+
+    # El turno de chat 2 no arrastra nada del chat 1.
+    history_chat_2 = spy.histories[1]
+    contenidos = [m["content"] for m in (history_chat_2 or [])]
+    assert "pregunta de chat 1" not in contenidos
+    # Y de hecho, al ser su primer turno, chat 2 no tenía historial previo
+    # (get_history devuelve [] para un chat sin turnos).
+    assert history_chat_2 == []
+
+
+def test_history_constante_entre_reintentos_del_mismo_turno(monkeypatch, _memoria_limpia):
+    """El history del turno previo es el mismo en los 2 intentos; el feedback no.
+
+    Sembramos un turno previo (chat 5) y, en el turno actual, el 1er intento
+    falla en run_query y el 2º converge. Ambos intentos deben llevar el MISMO
+    history (el del turno previo); el 2º intento, además, lleva el error_feedback.
+    """
+    # Turno previo que puebla la memoria del chat 5.
+    spy_previo = _GenerateSpy(["SELECT count(*) AS total FROM orders"])
+    monkeypatch.setattr(execute, "generate_sql", spy_previo)
+    monkeypatch.setattr(execute, "validate_and_secure", lambda sql: sql)
+    monkeypatch.setattr(execute, "run_query", _fake_run_query_ok)
+    answer_question("¿cuántos pedidos?", chat_id=5, client=SENTINEL_CLIENT)
+
+    historial_previo = [
+        {"role": "user", "content": "¿cuántos pedidos?"},
+        {"role": "assistant", "content": "SELECT count(*) AS total FROM orders"},
+    ]
+
+    # Turno actual: el 1er intento rompe en run_query; el 2º converge.
+    spy = _GenerateSpy(
+        [
+            "SELECT * FROM orders WHERE no_existe = 1",  # falla en run_query
+            "SELECT count(*) AS total FROM orders",  # válido
+        ]
+    )
+    monkeypatch.setattr(execute, "generate_sql", spy)
+
+    error_pg = 'column "no_existe" does not exist'
+
+    def fake_run_query(sql):
+        if "no_existe" in sql:
+            raise psycopg.errors.UndefinedColumn(error_pg)
+        return (["total"], [(830,)])
+
+    monkeypatch.setattr(execute, "run_query", fake_run_query)
+
+    result = answer_question("dame el detalle", chat_id=5, client=SENTINEL_CLIENT)
+
+    assert result.ok is True
+    assert result.attempts == 2
+    # Los 2 intentos del MISMO turno llevan el mismo history del turno previo.
+    assert spy.histories[0] == historial_previo
+    assert spy.histories[1] == historial_previo
+    # Ortogonalidad: el 1er intento sin feedback, el 2º con el error de PG.
+    assert spy.feedbacks[0] is None
+    assert spy.feedbacks[1] is not None
+    assert "no_existe" in spy.feedbacks[1]

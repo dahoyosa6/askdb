@@ -3,11 +3,11 @@
 > Diario de a bordo. Primer archivo que se lee al abrir sesión, último que se escribe al cerrar.
 
 ## Estado general
-- **Fase actual:** Fase 4 COMPLETA ✅ (router de formato) → siguiente: Fase 5 (memoria conversacional).
-- **% MVP:** ~55%. El cerebro está completo punta a punta por CLI (pregunta → SQL seguro →
-  auto-corrección → formato adecuado).
-- **Próximo paso:** Fase 5 — memoria conversacional corta para follow-ups ("¿y el mes pasado?")
-  usando el `chat_id` ya reservado en `answer_question`.
+- **Fase actual:** Fase 5 COMPLETA ✅ (memoria conversacional) → siguiente: Fase 6 (bot Telegram).
+- **% MVP:** ~65%. El cerebro entiende conversaciones (follow-ups) además de preguntas sueltas.
+- **Próximo paso:** Fase 6 — bot de Telegram (texto): allowlist de chat IDs, rate limit, y
+  cablear el `chat_id` real de cada chat a `answer_question` (la memoria ya está lista para recibirlo).
+  Decidir si exponer un comando `/reset` que llame a `memory.reset(chat_id)`.
 
 ## Funcionalidades (estado)
 | # | Funcionalidad | Estado | Pruebas |
@@ -17,7 +17,7 @@
 | F2 | Guardrails de seguridad | ✅ Terminada | 41/41 (validador) + e2e timeout |
 | F3 | Auto-corrección | ✅ Terminada | 63/63 (5 nuevos, mockeados) |
 | F4 | Router de formato (texto/gráfica/Excel) | ✅ Terminada | 88/88 (25 nuevos) |
-| F5 | Memoria conversacional | Pendiente | — |
+| F5 | Memoria conversacional | ✅ Terminada | 100/100 (12 nuevos) |
 | F6 | Bot Telegram (texto) | Pendiente | — |
 | F7 | Voz (Groq) | Pendiente | — |
 | F8 | Despliegue Railway | Pendiente | — |
@@ -50,20 +50,45 @@
       todo el archivo (ya pasó una vez y borró `DATABASE_URL`).
 - [ ] (Fase 8) Crear cuenta/keys de Telegram (BotFather) y Groq cuando lleguemos a esas fases.
 
-## Para la PRÓXIMA sesión (Fase 5 — memoria conversacional)
-- **Objetivo:** que un follow-up ("¿y el mes pasado?") se entienda sin repetir contexto,
-  dentro de la misma conversación. Criterio F5 del PRD.
-- `answer_question(question, chat_id=None, ...)` ya tiene `chat_id` RESERVADO (hoy sin uso).
-  `generate_sql(...)` ya acepta `history` (lista de mensajes estilo API). Construir el módulo
-  `app/agent/memory.py`: guardar/recuperar los últimos N turnos por `chat_id` (usar
-  `settings.memory_window`, ya en config = 6) y pasarlos como `history` a `generate_sql`.
-- Decidir almacén: en memoria (dict por chat_id) basta para v1/demo; documentar que se pierde al
-  reiniciar (aceptable hasta tener persistencia). Mantener `answer_question` testeable (inyectable).
-- Tests (mockeados): un 2º turno hereda contexto del 1º (el `history` llega a generate_sql);
-  la ventana se respeta (no crece sin límite); chat_id distinto = memoria aislada.
+## Para la PRÓXIMA sesión (Fase 6 — bot de Telegram, texto)
+- **Objetivo:** la interfaz real. Bot de Telegram (python-telegram-bot v21) que recibe texto,
+  llama a `answer_question(question, chat_id=<id del chat>)` y responde según el `OutputResult`
+  del router (texto / envía PNG / envía documento Excel). Criterio F6 del PRD.
+- **Seguridad:** allowlist de chat IDs (`settings.allowed_chat_ids`) — solo responden los
+  autorizados; rate limit (`settings.rate_limit_per_min`, =10). NUNCA mostrar SQL al usuario.
+- **Memoria (ya lista):** pasar el `chat_id` real conecta la memoria de Fase 5 automáticamente.
+  Decidir si exponer comando `/reset` → `memory.reset(chat_id)` para "empezar de cero".
+- Construir `app/interfaces/telegram_bot.py` (hoy `app/interfaces/` está vacío) y, si hace falta,
+  `app/main.py` (FastAPI para webhook, o polling). Las keys de Telegram las crea David (BotFather).
+- Tests: mockear la API de Telegram; verificar allowlist (chat no autorizado se ignora), que el
+  pipeline se invoca con el chat_id correcto, y el ruteo de texto/imagen/documento.
 - Arranque: leer este `progress.md` + `prd.md` + `CLAUDE.md`; `source venv/bin/activate`;
-  `pytest` debe dar **88/88** antes de tocar nada. Código clave: `app/agent/execute.py`
-  (`answer_question`), `app/agent/generate_sql.py` (`history`), `config.py` (`memory_window`).
+  `pytest` debe dar **100/100** antes de tocar nada. Código clave: `app/agent/execute.py`
+  (`answer_question`), `app/output/router.py` (`OutputResult`), `app/agent/memory.py` (`reset`),
+  `config.py` (telegram_*, allowed_chat_ids, rate_limit_per_min).
+
+## Bitácora Fase 5 (memoria conversacional)
+### 2026-06-19
+- `app/agent/memory.py` (NUEVO): store en RAM por `chat_id` (`_STORE: dict`). API: `get_history`
+  (copia defensiva), `append_turn` (guarda `{user:pregunta}` + `{assistant:SQL ejecutado}` y recorta
+  a `settings.memory_window`, leído en runtime), `reset` (idempotente) y `clear_all` (para tests).
+  Documentada la limitación: RAM, single-process, sin persistencia ni locking → v2.
+  (delegado a code-architect reps 1–3; verificado por el Head.)
+- **Decisiones de producto (David):** memoria en **RAM** (no se escribe en la DB read-only; se pierde
+  al reiniciar, aceptable v1); se recuerda **pregunta + SQL** (no las filas).
+- **Decisiones técnicas:** turno del asistente = SQL en texto plano (no bloques tool_use reales);
+  `memory_window` cuenta mensajes (6 = 3 pares); se guarda el `safe_sql`; se guarda **solo en éxito**.
+  El historial va en `messages`, no en el `system` → el prompt-caching del esquema/glosario NO se rompe.
+- `app/agent/execute.py`: `answer_question` recupera `history` del turno previo (si hay `chat_id`),
+  lo pasa a `generate_sql` en TODOS los intentos (ortogonal al `error_feedback`), y hace `append_turn`
+  solo al tener éxito. `chat_id` ya no es "reservado". `generate_sql.py`/`config.py`/`cli.py` intactos.
+- Tests: `tests/test_memory.py` (6, store puro) + 6 de integración en `test_execute_autocorrect.py`
+  (2º turno hereda el history del 1º; sin chat_id history=None; éxito guarda; fallo no guarda;
+  aislamiento entre chats; history y error_feedback ortogonales). `_GenerateSpy` ampliado para
+  capturar `history` (retro-compatible). **Suite total: 100/100 verdes** (88 previos + 12 nuevos).
+- Nota desviación menor: el history del 1er turno de un chat es `[]` (no `None`); inocuo porque
+  `_build_messages` trata ambos igual (`if history:`).
+- Pendiente Fase 6: decidir comando `/reset` que exponga `memory.reset(chat_id)`. No se ejecutó CLI en vivo.
 
 ## Bitácora Fase 4 (router de formato de salida)
 ### 2026-06-19

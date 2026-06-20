@@ -135,3 +135,9 @@ formato automático → memoria → bot Telegram con allowlist → desplegado en
   1 eje): línea si el eje es fecha, barras si es categórico. Si generar gráfica/Excel falla, el
   router cae a texto (nunca expone el error). El router vive en la capa de salida; `answer_question`
   permanece puro (solo datos). (Fase 4.)
+- 2026-06-19 — **Memoria conversacional (F5) en RAM, no en la base.** La DB es read-only (regla
+  dura), así que el historial NO puede persistirse ahí. Se usa un store en memoria del proceso
+  (`dict` por `chat_id`). Consecuencia aceptada: se pierde al reiniciar el bot (persistencia = v2).
+  Se recuerda **pregunta + SQL ejecutado** (no las filas), acotado a `memory_window` (=6 mensajes
+  = 3 pares). El historial viaja en `messages` (no en `system`), así no rompe el prompt-caching.
+  Se guarda solo en turnos exitosos. (Decisiones de producto de David + técnicas, Fase 5.)
