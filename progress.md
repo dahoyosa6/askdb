@@ -57,17 +57,25 @@
 ## Para la PRÓXIMA sesión (Fase 8 — despliegue en Railway)
 - **Objetivo:** poner el bot en producción. Desplegar el servidor FastAPI (`app/main.py`) en Railway,
   configurar variables de entorno, registrar el webhook contra Telegram y probar EN VIVO (texto y voz).
-- Pasos previstos: (1) crear servicio en Railway apuntando al repo; (2) comando de arranque
-  `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (revisar/crear `Procfile` o config de Railway);
-  (3) cargar variables: `ANTHROPIC_API_KEY`, `DATABASE_URL` (Neon), `TELEGRAM_BOT_TOKEN`,
-  `ALLOWED_CHAT_IDS`, `WEBHOOK_SECRET`, `GROQ_API_KEY`, y `WEBHOOK_URL` = la URL pública que da Railway;
-  (4) al arrancar, el lifespan registra el webhook solo (ya está cableado); (5) probar texto y voz.
-- **MCPs útiles:** Vercel no aplica (es Railway); Sentry para errores en prod (opcional). Revisar si
-  hace falta `Procfile`/`railway.json` y un `runtime`/versión de Python (el venv usa 3.14).
+- **Listo de antemano:** la review de seguridad ya se hizo (2 vueltas, informes en `docs/revisiones/`);
+  `Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT`) y `.python-version` (3.12) ya creados;
+  el lifespan ya registra el webhook solo si hay `WEBHOOK_URL`. Suite **170/170** (correr `pytest` antes de tocar).
+- Pasos previstos: (1) crear servicio en Railway apuntando al repo (usa el `Procfile`); (2) cargar
+  variables: `ANTHROPIC_API_KEY`, `DATABASE_URL` (Neon, rol read-only), `ANTHROPIC_MODEL` (claude-sonnet-4-6),
+  `TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, `WEBHOOK_SECRET`, `GROQ_API_KEY`, y `WEBHOOK_URL` = la URL
+  pública que da Railway (apuntando a `/webhook`); (3) deploy → el lifespan registra el webhook; (4) recorrer
+  la **checklist de prueba manual en vivo** (en `docs/revisiones/tester-2026-06-19.md` §6: texto, gráfica,
+  Excel, voz, voz larga, no autorizado, rate limit, /reset+follow-up, webhook 403, pregunta imposible).
+- **Mantener 1 sola réplica** en Railway (el estado —memoria + rate limiter— vive en RAM; multi-instancia = v2).
+- **Diferido a F8 (de la review):** B4 — dar visibilidad al fallo de `set_webhook` vía **Sentry** (MCP
+  disponible) para que un registro fallido no quede solo en logs. Conectar Sentry en este paso.
+- **Recordatorio del estudio (§9 + Automatizaciones.md):** AskDB sería el PRIMER proyecto en producción →
+  activar la **guardia de producción** y el **pulso de analítica** (PostHog) listados en `Automatizaciones.md`.
 - Pendientes David (sin esto NO funciona en vivo): crear bot en BotFather (`TELEGRAM_BOT_TOKEN`),
   averiguar su `chat_id` (`ALLOWED_CHAT_IDS`), generar `WEBHOOK_SECRET` aleatorio, crear `GROQ_API_KEY`.
-- Antes de F8 conviene: code-review de seguridad (subagente) y, si se quiere, una prueba en vivo local
-  con un túnel (ngrok) antes de Railway. `pytest` debe dar **128/128** antes de tocar nada.
+- Opcional antes de Railway: prueba en vivo local con un túnel (ngrok) para validar el webhook end-to-end.
+- **Nota de mantenimiento (no bloquea):** 164 warnings de `pytest-asyncio` en Python 3.14 (deprecación de
+  event-loop-policy de la librería); el `StarletteDeprecationWarning` del TestClient es de FastAPI, no del código.
 
 ## Bitácora — 2ª vuelta: verificación de la review
 ### 2026-06-19
