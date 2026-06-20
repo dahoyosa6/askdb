@@ -5,7 +5,7 @@
 ## Estado general
 - **Fase actual:** Fase 7 COMPLETA ✅ + **review completa de endurecimiento pre-F8 ✅** → siguiente: Fase 8 (despliegue Railway).
 - **% MVP:** ~92%. MVP funcional COMPLETO y endurecido: el agente acepta texto y voz por Telegram,
-  seguro y con memoria. Suite ahora en **162/162** tras los arreglos de la review.
+  seguro y con memoria. Suite ahora en **170/170** tras dos vueltas de review + verificación.
 - **Próximo paso:** Fase 8 — desplegar en Railway: subir el servidor FastAPI, definir variables de
   entorno (token, keys, WEBHOOK_URL pública, WEBHOOK_SECRET), registrar el webhook y probar en vivo.
 
@@ -68,6 +68,20 @@
   averiguar su `chat_id` (`ALLOWED_CHAT_IDS`), generar `WEBHOOK_SECRET` aleatorio, crear `GROQ_API_KEY`.
 - Antes de F8 conviene: code-review de seguridad (subagente) y, si se quiere, una prueba en vivo local
   con un túnel (ngrok) antes de Railway. `pytest` debe dar **128/128** antes de tocar nada.
+
+## Bitácora — 2ª vuelta: verificación de la review
+### 2026-06-19
+- Re-review con los 4 subagentes (informes `*-verificacion-2026-06-19.md` en `docs/revisiones/`)
+  para confirmar que los arreglos quedaron **de fondo** y sin regresiones.
+- **Veredictos:** code-architect "listo para F8" (11/13 hallazgos resueltos de fondo, 0 sin resolver,
+  B1/B4 aceptados por diseño; seguridad SQL re-probada intacta, sin regresiones); tester **PASA F8**
+  (huecos cerrados con tests reales, aserciones endurecidas); auditor **alineado** (desviaciones
+  cerradas); calidad **aprobado sin reservas** (ningún texto técnico se cuela al usuario).
+- **Único hallazgo nuevo (B5-NEW, 🟡, no explotable hoy):** una función entre comillas dobles
+  `SELECT "pg_read_file"(...)` evadía la denylist (sqlparse la tokeniza como `String.Symbol`, no
+  `Name`). **Cerrado de fondo:** el escaneo ahora cubre `T.Name` y `String.Symbol` (comillas,
+  mayúsculas, esquema calificado citado), sin falsos positivos. +8 tests. **Suite: 170/170.**
+- Cosméticos de docs cerrados: Python 3.12 (compat 3.11+), conteo de tests sincronizado a 170.
 
 ## Bitácora — Review completa + endurecimiento pre-F8
 ### 2026-06-19

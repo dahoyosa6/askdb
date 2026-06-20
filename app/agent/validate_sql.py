@@ -81,6 +81,16 @@ _KEYWORD_TTYPES = (
     T.Keyword.CTE,
 )
 
+# Tipos de token que pueden NOMBRAR una función al ir seguidos de '('.
+# - `T.Name`: identificador sin comillas (`pg_read_file(...)`).
+# - `T.Literal.String.Symbol`: identificador citado con comillas dobles
+#   (`"pg_read_file"(...)`), forma válida en Postgres que sqlparse NO marca como
+#   Name. Sin incluirlo, una función citada evadía la denylist (hallazgo B5-NEW).
+_FUNCTION_NAME_TTYPES = (
+    T.Name,
+    T.Literal.String.Symbol,
+)
+
 # Primeras palabras permitidas para la sentencia.
 _ALLOWED_FIRST = frozenset({"SELECT", "WITH"})
 
@@ -147,11 +157,18 @@ def validate_and_secure(sql: str, *, max_limit: int | None = None) -> str:
             tokens_significativos.append(token)
 
     # 3b. Denylist de funciones peligrosas por nombre (defensa en profundidad).
-    #     Una llamada a función es un token Name seguido (sin espacios, ya filtrados)
-    #     de un '('. Así un literal 'pg_read_file ...' o una columna 'lo_importante'
-    #     NO disparan (no van seguidos de paréntesis con ese nombre exacto).
+    #     Una llamada a función es un identificador seguido (sin espacios, ya
+    #     filtrados) de un '('. El identificador puede ir SIN comillas (`T.Name`,
+    #     p.ej. pg_read_file) o entre comillas dobles (`String.Symbol`, p.ej.
+    #     "pg_read_file"), ambas válidas en Postgres. Se normaliza quitando las
+    #     comillas dobles y se compara en minúsculas (en Postgres el nombre citado
+    #     es case-sensitive, pero por seguridad bloqueamos igual cualquier casing).
+    #     Para esquema calificado (`"pg_catalog"."pg_read_file"(...)`), el token
+    #     que precede al '(' es el nombre de la función, que es lo que importa.
+    #     Un literal 'pg_read_file ...' o un identificador citado que NO va seguido
+    #     de '(' (p.ej. columna "pg_read_file_log" FROM t) NO disparan.
     for actual, siguiente in zip(tokens_significativos, tokens_significativos[1:]):
-        if actual.ttype is T.Name and (
+        if actual.ttype in _FUNCTION_NAME_TTYPES and (
             siguiente.ttype is T.Punctuation and siguiente.value == "("
         ):
             nombre = actual.value.strip('"').lower()

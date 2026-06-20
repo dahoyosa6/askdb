@@ -308,3 +308,33 @@ def test_denylist_no_bloquea_columna_parecida():
     # de nombre completo NO debe confundirlos.
     out = validate_and_secure("SELECT lo_importante FROM productos")
     assert out.strip()
+
+
+# Funciones peligrosas CITADAS con comillas dobles (hallazgo B5-NEW).
+# En Postgres `"pg_read_file"(...)` es una llamada válida; sqlparse la tokeniza
+# como String.Symbol (no como Name), así que evadía la denylist. La app ahora
+# normaliza quitando las comillas y la bloquea igual.
+FUNCIONES_PELIGROSAS_CITADAS = [
+    pytest.param('SELECT "pg_read_file"(\'/etc/passwd\')', id="citada-pg_read_file"),
+    pytest.param('SELECT "PG_READ_FILE"(\'x\')', id="citada-mayusculas"),
+    pytest.param('SELECT "pg_read_file" (\'x\')', id="citada-con-espacio"),
+    pytest.param('SELECT "lo_import"(1)', id="citada-lo_import"),
+    pytest.param('SELECT "dblink"(\'a\', \'b\')', id="citada-dblink"),
+    pytest.param('SELECT "pg_catalog"."pg_read_file"(1)', id="citada-esquema-calificado"),
+    pytest.param('SELECT pg_catalog."pg_read_file"(1)', id="citada-esquema-mixto"),
+]
+
+
+@pytest.mark.parametrize("sql", FUNCIONES_PELIGROSAS_CITADAS)
+def test_bloquea_funciones_peligrosas_citadas(sql):
+    """Una función peligrosa entre comillas dobles también se rechaza (B5-NEW)."""
+    with pytest.raises(SQLValidationError):
+        validate_and_secure(sql)
+
+
+def test_denylist_citada_no_falso_positivo_sin_parentesis():
+    """Un identificador citado que contiene el nombre pero NO es una llamada
+    a función (no va seguido de '(') NO debe bloquearse (no falso positivo)."""
+    # "pg_read_file_log" es una columna citada, sin paréntesis: debe PASAR.
+    out = validate_and_secure('SELECT "pg_read_file_log" FROM t')
+    assert out.strip()

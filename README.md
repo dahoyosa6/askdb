@@ -39,7 +39,7 @@ La v1 corre sobre la base **Northwind** (un estándar de comercio: productos, cl
 
 ## Stack
 
-Python 3.11+ · FastAPI · Anthropic SDK (`claude-sonnet-4-6`) · python-telegram-bot ·
+Python 3.12 (compatible 3.11+) · FastAPI · Anthropic SDK (`claude-sonnet-4-6`) · python-telegram-bot ·
 psycopg3 · sqlparse · matplotlib · pandas + openpyxl · Groq (voz) · Neon (DB) · Railway (deploy).
 
 ## Cómo correrlo (local)
@@ -57,7 +57,7 @@ pytest                          # pruebas
 
 **MVP funcional completo:** texto y voz por Telegram, seguro (validación + LIMIT + rol
 read-only, con allowlist y rate limit), con memoria conversacional y formato automático
-(texto / gráfica / Excel). Suite de 128+ pruebas en verde. **Pendiente:** el despliegue en
+(texto / gráfica / Excel). Suite de 170 pruebas en verde. **Pendiente:** el despliegue en
 Railway (Fase 8). Ver `progress.md` para el detalle por fase.
 
 ---

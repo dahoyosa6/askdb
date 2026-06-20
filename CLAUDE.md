@@ -10,7 +10,7 @@ en texto / gráfica PNG / Excel, con memoria conversacional y auto-corrección. 
 de portafolio: replicable y barato de operar.
 
 ## Stack
-Python 3.11+ · FastAPI+uvicorn · Anthropic SDK (`claude-sonnet-4-6`) · python-telegram-bot v21 ·
+Python 3.12 (compatible 3.11+) · FastAPI+uvicorn · Anthropic SDK (`claude-sonnet-4-6`) · python-telegram-bot v21 ·
 psycopg3 (+pool) · sqlparse · matplotlib · pandas+openpyxl · groq (voz) · python-dotenv.
 DB: **Neon Postgres** (free). Hosting: **Railway**. Repo: GitHub público.
 
@@ -43,7 +43,7 @@ DB: **Neon Postgres** (free). Hosting: **Railway**. Repo: GitHub público.
 
 ## Estado por fases (resumen; detalle en progress.md)
 - F0 Setup ✅ · F1 Core CLI ✅ (vivo) · F2 Guardrails ✅ · F3 Auto-corrección ✅ ·
-  F4 Formato ✅ · F5 Memoria ✅ · F6 Telegram (webhook) ✅ · F7 Voz ✅ (128 tests).
+  F4 Formato ✅ · F5 Memoria ✅ · F6 Telegram (webhook) ✅ · F7 Voz ✅ (170 tests).
 - **F8 Railway (despliegue) → siguiente.** MVP funcional completo: texto y voz por
   Telegram, seguro, con memoria y formato automático.
 
